@@ -12,8 +12,10 @@ Hands-free checklists for daily repetitive tasks. Voice checks steps off, app sp
 | 4 | Per-step timers | done |
 | 5 | PWA (installable, offline) | done |
 | 6 | Accounts + sync | done — live on project CheckoffLists |
-| 7 | Sharing (send a link, recipient gets their own copy) | done |
+| 7 | Sharing — copy link and live link | done |
 | 8 | Deploy | live at https://andreasmaskos.github.io/Checkoff/ |
+| 9 | Sign up / sign in screen (password + magic link) | done |
+| 10 | Visual design pass | done |
 
 Schema changes go in `supabase/migrations/` and are applied to the production
 database by the GitHub integration on push to main — don't hand-edit tables in
@@ -88,21 +90,32 @@ window focus, newer `updated_at` wins in whichever direction. Two devices editin
 side. Per-item merge only if that turns out to happen.
 
 ### Sharing
-Copy semantics, deliberately: the recipient gets their own independent list and
-the two drift apart afterwards. Nobody can edit your list, and running a shared
-list never touches anyone else's checkmarks — run state is device-local and
-never leaves the browser.
+Two modes, chosen per list in the editor. Either way, run state — what is
+checked off right now — is device-local and never syncs, so two people running
+the same list never touch each other's checkmarks.
 
-- "Share" on a list mints a `share_token` and hands you `…/#share=<uuid>`
-  (native share sheet on phones, clipboard otherwise).
-- Opening that link calls `shared_list(token)` and offers to add a copy — new id,
-  no token. Works without an account; the copy just lives in that browser.
-- "Stop sharing" in the editor clears the token and kills every old link.
-  Copies already made are unaffected.
+| Mode | Link does | Recipient |
+|------|-----------|-----------|
+| **Send a copy** | `shared_list(token)` returns the content | Gets an independent list with a fresh id; the two drift apart. No account needed |
+| **Share live** | `accept_invite(token)` inserts a `shares` row | Joins *this* list and can edit it. Needs an account |
 
-Live shared lists (both people editing one list) are **not** built. If ever
-wanted, it's one `shares (list_id, user_id, can_edit)` table plus an
-`accept_invite(token)` function — additive, no rewrite.
+Everyone on a live list is an equal editor — no view-only role until someone
+asks for one. RLS grants members write access to the whole row, which is more
+than we mean, so the `lists_member_guard` trigger is the real boundary: members
+change content, only the owner transfers, deletes, or mints links.
+
+"Stop sharing" clears the token and removes every member. Copies already made
+are unaffected.
+
+**Watch out:** policies on `lists` and `shares` must not query each other
+directly — that recursed (42P17) and 500'd every read until
+`20260811150000_fix_policy_recursion.sql` moved both lookups into
+`security definer` helpers (`is_member`, `owns_list`).
+
+### Accounts
+Email + password sign up and sign in on a dedicated screen, magic link as the
+alternative. An account is optional: with no account the app is fully usable and
+purely local. Signing in merges what's on the device with what's on the server.
 
 ## Running it
 
