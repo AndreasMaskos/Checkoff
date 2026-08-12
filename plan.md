@@ -11,8 +11,13 @@ Hands-free checklists for daily repetitive tasks. Voice checks steps off, app sp
 | 3 | Undo | done |
 | 4 | Per-step timers | done |
 | 5 | PWA (installable, offline) | done |
-| 6 | Accounts + sync | done — needs your Supabase keys in `config.js` |
+| 6 | Accounts + sync | done — live on project CheckoffLists |
 | 7 | Sharing (send a link, recipient gets their own copy) | done |
+| 8 | Deploy | live at https://andreasmaskos.github.io/Checkoff/ |
+
+Schema changes go in `supabase/migrations/` and are applied to the production
+database by the GitHub integration on push to main — don't hand-edit tables in
+the dashboard, or the repo stops describing reality.
 
 ## Files
 
@@ -47,9 +52,9 @@ navigation). Only within a run — closing the run drops the stack.
 ### Accounts + sync
 Supabase magic-link email login. No passwords, no server code of ours.
 
-**Setup (one time):**
+**Setup (already done for project CheckoffLists — kept for reference / a second project):**
 1. Create a free project at supabase.com.
-2. SQL editor → run:
+2. Push `supabase/migrations/*.sql`, or paste the same SQL into the SQL editor:
    ```sql
    create table lists (
      id          uuid primary key,
