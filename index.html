@@ -4,128 +4,296 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="theme-color" content="#2d7d46">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#E9EAE5">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0E1116">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>Checkoff</title>
 <style>
-  :root { color-scheme: light dark; --bg:#fff; --fg:#111; --muted:#777; --line:#ddd; --accent:#2d7d46; --warn:#c0392b; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#111; --fg:#eee; --muted:#999; --line:#333; --accent:#4ade80; --warn:#ff6b5b; } }
-  * { box-sizing: border-box; }
-  body { margin:0 auto; padding:1rem max(1rem, env(safe-area-inset-left)) 4rem; font:16px/1.5 system-ui, sans-serif;
-         background:var(--bg); color:var(--fg); max-width:40rem; }
-  h1 { font-size:1.3rem; margin:0 0 1rem; }
-  button { font:inherit; padding:.6rem 1rem; border:1px solid var(--line); border-radius:.5rem;
-           background:transparent; color:inherit; cursor:pointer; }
-  button.primary { background:var(--accent); color:#fff; border-color:transparent; }
-  input, textarea { font:inherit; width:100%; padding:.6rem; border:1px solid var(--line);
-                    border-radius:.5rem; background:transparent; color:inherit; }
-  textarea { min-height:12rem; }
-  .row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; margin:.75rem 0; }
-  .grow { flex:1; }
-  ul { list-style:none; padding:0; }
-  li { display:flex; gap:.75rem; align-items:baseline; padding:.6rem 0; border-bottom:1px solid var(--line); }
-  li.done { color:var(--muted); text-decoration:line-through; }
-  li.current { font-weight:600; font-size:1.4rem; text-decoration:none; }
-  li .mark { width:1.5rem; flex:none; text-align:center; }
-  .muted { color:var(--muted); font-size:.875rem; }
-  .warn { color:var(--warn); }
-  .hidden { display:none; }
-  #heard { min-height:1.5rem; font-style:italic; }
-  #auth { border-bottom:1px solid var(--line); padding-bottom:.5rem; }
-  #auth input { max-width:16rem; }
-  progress { width:100%; height:.5rem; }
+:root {
+  color-scheme: light dark;
+  --bg:#E9EAE5; --panel:#F7F8F5; --fg:#14181D; --dim:#69707A; --line:#D2D6CD;
+  --go:#25874E; --time:#9A6608; --over:#B23B27;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --gap: clamp(1rem, 4vw, 1.75rem);
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#0E1116; --panel:#161A21; --fg:#E8EAED; --dim:#8A93A0; --line:#262C35;
+          --go:#4ADE80; --time:#E0A32E; --over:#FF6B5B; }
+}
+* { box-sizing: border-box; }
+html, body { min-height: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font: 400 16px/1.5 var(--sans);
+  -webkit-text-size-adjust: 100%;
+}
+.wrap { max-width: 44rem; margin-inline: auto; padding: 0 var(--gap) 6rem; }
+
+/* --- the mono register: numbers, labels, states --- */
+.mono, .eyebrow, .num, .btn { font-family: var(--mono); }
+.eyebrow { font-size: .6875rem; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
+
+/* --- masthead --- */
+header {
+  display: flex; align-items: center; gap: .75rem;
+  padding: 1.25rem 0 .75rem; border-bottom: 1px solid var(--fg);
+}
+.wordmark { font: 800 1.0625rem/1 var(--sans); letter-spacing: -.02em; text-transform: uppercase; }
+.wordmark b { color: var(--go); }
+header .eyebrow { margin-left: auto; }
+
+/* --- controls --- */
+.btn {
+  font-size: .75rem; letter-spacing: .08em; text-transform: uppercase;
+  padding: .6rem .85rem; border: 1px solid var(--line); border-radius: 5px;
+  background: var(--panel); color: var(--fg); cursor: pointer;
+}
+.btn:hover { border-color: var(--fg); }
+.btn.go { background: var(--go); border-color: var(--go); color: var(--bg); font-weight: 700; }
+.btn.quiet { background: none; border-color: transparent; color: var(--dim); padding-inline: .4rem; }
+.btn.quiet:hover { color: var(--fg); }
+:where(button, input, textarea, a):focus-visible { outline: 2px solid var(--go); outline-offset: 2px; }
+input, textarea {
+  font: 400 1rem/1.5 var(--sans); width: 100%; padding: .7rem .8rem; color: var(--fg);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 5px;
+}
+textarea { min-height: 13rem; font-family: var(--mono); font-size: .9375rem; line-height: 1.8; resize: vertical; }
+label { display: block; margin-bottom: 1rem; }
+label .eyebrow { display: block; margin-bottom: .35rem; }
+.row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.spacer { flex: 1; }
+.hidden { display: none !important; }
+.note { color: var(--dim); font-size: .8125rem; }
+.note.bad { color: var(--over); }
+
+/* --- home: checklist index --- */
+#index { list-style: none; margin: 0; padding: 0; }
+#index li { border-bottom: 1px solid var(--line); padding: .9rem 0; }
+#index .title { font-size: 1.125rem; font-weight: 600; letter-spacing: -.01em; }
+#index .meta { display: flex; gap: .75rem; font-size: .6875rem; letter-spacing: .1em;
+               text-transform: uppercase; color: var(--dim); margin-top: .15rem; }
+#index .meta .badge { color: var(--go); }
+#index .acts { margin-top: .6rem; }
+.empty { padding: 3rem 0; border-bottom: 1px solid var(--line); }
+.empty p { margin: 0 0 .35rem; color: var(--dim); }
+
+/* --- runner: the teleprompter --- */
+#log { padding-top: .5rem; }
+.line {
+  display: flex; gap: .75rem; align-items: baseline; width: 100%; text-align: left;
+  background: none; border: 0; border-bottom: 1px solid var(--line);
+  padding: .4rem 0; color: var(--dim); font-family: var(--mono); font-size: .8125rem; cursor: pointer;
+}
+.line .txt { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.line.checked .txt { text-decoration: line-through; }
+.line.checked .num { color: var(--go); }
+#stage { padding: clamp(1.5rem, 6vw, 2.75rem) 0; }
+#counter { display: flex; align-items: baseline; gap: .6rem; margin-bottom: .5rem; }
+#challenge {
+  font: 650 clamp(1.875rem, 8vw, 3.25rem)/1.08 var(--sans);
+  letter-spacing: -.03em; margin: 0; text-wrap: balance;
+}
+#clock { font: 500 clamp(1.5rem, 5vw, 2rem)/1 var(--mono); margin-top: .75rem; color: var(--time); }
+#clock.over { color: var(--over); }
+#stage.fresh #challenge, #stage.fresh #clock { animation: rise .28s ease-out; }
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+#queue .line { cursor: pointer; opacity: .55; }
+
+/* --- action bar --- */
+#bar {
+  position: sticky; bottom: 0; margin-top: 1.25rem; padding: .75rem 0 max(.75rem, env(safe-area-inset-bottom));
+  background: linear-gradient(to top, var(--bg) 70%, transparent);
+}
+#bar .row { gap: .4rem; }
+#bar .btn.go { flex: 1; padding-block: .85rem; font-size: .8125rem; }
+#mic { display: flex; align-items: center; gap: .5rem; margin-top: .6rem; min-height: 1.4rem; }
+#dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--line); flex: none; }
+#dot.on { background: var(--go); animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .25; } }
+#heard { font-family: var(--mono); font-size: .75rem; color: var(--dim);
+         overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* --- panels (sharing, auth) --- */
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+         padding: 1rem; margin: 1.25rem 0; }
+.panel h2 { font: 600 .9375rem/1 var(--sans); margin: 0 0 .75rem; }
+#linkOut { font-family: var(--mono); font-size: .8125rem; }
+#auth { max-width: 24rem; margin-inline: auto; padding-top: 2.5rem; }
+#auth h1 { font: 650 1.75rem/1.15 var(--sans); letter-spacing: -.03em; margin: 0 0 .4rem; }
+#auth .lede { color: var(--dim); margin: 0 0 1.75rem; }
+#tabs { display: flex; gap: .25rem; margin-bottom: 1.25rem; border-bottom: 1px solid var(--line); }
+#tabs button { background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px;
+               padding: .5rem .1rem; margin-right: 1.25rem; color: var(--dim); cursor: pointer;
+               font: .75rem/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+#tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--go); }
+
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
 </head>
 <body>
+<div class="wrap">
 
+<header>
+  <span class="wordmark">Check<b>off</b></span>
+  <span class="eyebrow" id="who"></span>
+</header>
+
+<!-- ============ home ============ -->
 <section id="home">
-  <h1>Checkoff</h1>
-  <div class="row" id="auth"></div>
-  <ul id="lists"></ul>
-  <div class="row"><button class="primary" onclick="edit(null)">New checklist</button></div>
-  <p class="muted" id="support"></p>
+  <ul id="index"></ul>
+  <div class="row" style="margin-top:1.25rem">
+    <button class="btn go" onclick="edit(null)">New checklist</button>
+    <span class="spacer"></span>
+    <button class="btn quiet" id="acctBtn"></button>
+  </div>
+  <p class="note" id="support"></p>
 </section>
 
+<!-- ============ editor ============ -->
 <section id="editor" class="hidden">
-  <h1>Edit checklist</h1>
-  <div class="row"><input id="title" placeholder="Name, e.g. Morning routine"></div>
-  <div class="row"><textarea id="items" placeholder="One step per line.&#10;Add a timer with @: Brush teeth @2m"></textarea></div>
-  <div class="row">
-    <button class="primary" onclick="save()">Save</button>
-    <button onclick="renderHome()">Cancel</button>
-    <span class="grow"></span>
-    <button id="unshareBtn" class="hidden" onclick="unshare()">Stop sharing</button>
-    <button onclick="del()">Delete</button>
+  <p class="eyebrow" style="padding-top:1.25rem">Checklist</p>
+  <label>
+    <span class="eyebrow">Name</span>
+    <input id="title" placeholder="Morning routine">
+  </label>
+  <label>
+    <span class="eyebrow">Steps — one per line</span>
+    <textarea id="items" placeholder="Kettle on&#10;Grind beans @40s&#10;Rinse portafilter&#10;Pull shot @28s"></textarea>
+  </label>
+  <p class="note">Add a countdown with <code>@</code> — <code>@2m</code>, <code>@30s</code>, <code>@1:30</code>, or <code>@3</code> for minutes.</p>
+
+  <div class="panel" id="sharePanel">
+    <h2>Sharing</h2>
+    <div id="shareBody"></div>
   </div>
-  <p class="muted">Timers: <code>@2m</code>, <code>@30s</code>, <code>@1:30</code>, <code>@3</code> (minutes).</p>
+
+  <div class="row">
+    <button class="btn go" onclick="save()">Save</button>
+    <button class="btn" onclick="renderHome()">Cancel</button>
+    <span class="spacer"></span>
+    <button class="btn quiet" id="removeBtn" onclick="removeList()">Delete</button>
+  </div>
 </section>
 
+<!-- ============ runner ============ -->
 <section id="runner" class="hidden">
-  <h1 id="runTitle"></h1>
-  <progress id="prog" value="0" max="1"></progress>
-  <ul id="steps"></ul>
-  <div class="row">
-    <button class="primary" id="micBtn" onclick="toggleMic()">Start voice</button>
-    <button onclick="mark(true)">Done</button>
-    <button onclick="mark(false)">Skip</button>
-    <button onclick="move(-1)">Back</button>
-    <button onclick="undo()">Undo</button>
-    <button onclick="quit()">Exit</button>
+  <div id="log"></div>
+  <div id="stage">
+    <div id="counter"><span class="eyebrow" id="stepNo"></span><span class="eyebrow" id="listName"></span></div>
+    <h1 id="challenge"></h1>
+    <div id="clock" class="hidden"></div>
   </div>
-  <p id="heard" class="muted"></p>
-  <p class="muted">Say: done / skip / next / back / repeat / undo / stop</p>
+  <div id="queue"></div>
+  <div id="bar">
+    <div class="row">
+      <button class="btn go" onclick="mark(true)">Done</button>
+      <button class="btn" onclick="mark(false)">Skip</button>
+      <button class="btn" onclick="move(-1)">Back</button>
+      <button class="btn" onclick="undo()">Undo</button>
+      <button class="btn quiet" onclick="quit()">Exit</button>
+    </div>
+    <div id="mic">
+      <span id="dot"></span>
+      <button class="btn quiet" id="micBtn" onclick="toggleMic()">Start voice</button>
+      <span id="heard"></span>
+    </div>
+  </div>
 </section>
+
+<!-- ============ auth ============ -->
+<section id="auth" class="hidden">
+  <h1 id="authHead">Keep your checklists everywhere</h1>
+  <p class="lede" id="authLede">One account syncs every device and lets you share a list with someone else.</p>
+  <div id="tabs">
+    <button id="tabIn" onclick="setMode('in')">Sign in</button>
+    <button id="tabUp" onclick="setMode('up')">Create account</button>
+  </div>
+  <form id="authForm">
+    <label>
+      <span class="eyebrow">Email</span>
+      <input id="authEmail" type="email" autocomplete="email" required placeholder="you@example.com">
+    </label>
+    <label>
+      <span class="eyebrow">Password</span>
+      <input id="authPass" type="password" autocomplete="current-password" required minlength="6" placeholder="At least 6 characters">
+    </label>
+    <div class="row">
+      <button class="btn go" id="authGo" type="submit">Sign in</button>
+      <button class="btn quiet" type="button" onclick="magicLink()">Email me a link instead</button>
+    </div>
+  </form>
+  <p class="note" id="authNote" style="margin-top:1rem"></p>
+  <p style="margin-top:2rem"><button class="btn quiet" onclick="renderHome()">← Back to my checklists</button></p>
+</section>
+
+</div>
 
 <script type="module">
 const $ = id => document.getElementById(id);
-const btn = (label, fn) => Object.assign(document.createElement('button'), { textContent: label, onclick: fn });
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+function make(tag, props, kids = []) { const n = Object.assign(document.createElement(tag), props); n.append(...kids); return n; }
+const button = (label, fn, cls = 'btn') => make('button', { className: cls, textContent: label, onclick: fn });
 
-/* ---------- storage ----------
-   One record per list so sync and sharing work per list, not per account.
-   deleted:true is a tombstone — kept so a delete propagates instead of the
-   list resurrecting from another device on the next sync. */
+/* ================= storage =================
+   One record per checklist: that is what makes per-list sync and sharing work.
+   deleted:true is a tombstone so a delete propagates instead of the list coming
+   back from another device on the next sync. */
 let db = JSON.parse(localStorage.checkoff || '{"lists":[]}');
-for (const l of db.lists) {                                  // migrate the old blob shape
-  l.id ??= crypto.randomUUID();
-  l.updatedAt ??= Date.now();
-}
+for (const l of db.lists) { l.id ??= crypto.randomUUID(); l.updatedAt ??= Date.now(); }
 let editing = null, run = null;
 
-const save_ = () => localStorage.checkoff = JSON.stringify(db);
+const saveLocal = () => localStorage.checkoff = JSON.stringify(db);
 const byId = id => db.lists.find(l => l.id === id);
 const visible = () => db.lists.filter(l => !l.deleted);
+const mine = l => !l.owner || l.owner === user?.id;
 
-function touch(list) {
-  list.updatedAt = Date.now();
-  save_();
-  push([list]);
-}
+function touch(list) { list.updatedAt = Date.now(); saveLocal(); push([list]); }
 function show(id) {
-  for (const s of document.querySelectorAll('body > section')) s.classList.toggle('hidden', s.id !== id);
+  for (const s of document.querySelectorAll('section')) s.classList.toggle('hidden', s.id !== id);
+  scrollTo(0, 0);
 }
 
-/* ---------- home ---------- */
+/* ================= home ================= */
 function renderHome() {
-  $('lists').innerHTML = '';
-  for (const l of visible()) {
-    const li = document.createElement('li');
-    li.innerHTML = `<span class="grow">${l.title}${l.shareToken ? ' <span class="muted">shared</span>' : ''}</span>`;
-    li.append(btn('Start', () => start(l.id)), btn('Edit', () => edit(l.id)));
-    if (user) li.append(btn('Share', () => share(l)));
-    $('lists').append(li);
+  const ul = $('index');
+  ul.innerHTML = '';
+  const lists = visible();
+  if (!lists.length) {
+    ul.innerHTML = '<li class="empty"><p>No checklists yet.</p>' +
+      '<p class="note">Make one for something you do the same way every day — then run it hands-free.</p></li>';
   }
+  for (const l of lists) {
+    const total = l.items.reduce((t, s) => t + parseStep(s).secs, 0);
+    const badge = !mine(l) ? '<span class="badge">shared with you</span>'
+                : l.shareToken ? `<span class="badge">${l.shareMode === 'live' ? 'shared live' : 'link out'}</span>` : '';
+    const li = make('li', { innerHTML:
+      `<div class="title">${esc(l.title)}</div>
+       <div class="meta"><span>${l.items.length} step${l.items.length === 1 ? '' : 's'}</span>` +
+       (total ? `<span>${mmss(total)} timed</span>` : '') + badge + '</div>' });
+    li.append(make('div', { className: 'row acts' }, [
+      button('Start', () => start(l.id), 'btn go'),
+      button('Edit', () => edit(l.id)),
+    ]));
+    ul.append(li);
+  }
+  $('acctBtn').textContent = !sb ? '' : user ? 'Sign out' : 'Sign in to sync';
+  $('acctBtn').classList.toggle('hidden', !sb);
+  $('acctBtn').onclick = () => user ? sb.auth.signOut() : showAuth('in');
+  $('who').textContent = user ? user.email : '';
   show('home');
 }
 
-/* ---------- editor ---------- */
+/* ================= editor ================= */
 function edit(id) {
   editing = id;
   const l = id === null ? { title: '', items: [] } : byId(id);
   $('title').value = l.title;
   $('items').value = l.items.join('\n');
-  $('unshareBtn').classList.toggle('hidden', !l.shareToken);
+  $('removeBtn').textContent = mine(l) ? 'Delete' : 'Leave this list';
+  renderShare(l);
   show('editor');
 }
 function save() {
@@ -139,14 +307,23 @@ function save() {
   touch(l);
   renderHome();
 }
-function del() {
+async function removeList() {
   const l = editing !== null && byId(editing);
-  if (l && confirm('Delete this checklist?')) { l.deleted = true; touch(l); }
+  if (!l) return renderHome();
+  if (!mine(l)) {
+    if (!confirm('Leave this list? The owner keeps it.')) return;
+    await sb.from('shares').delete().eq('list_id', l.id);
+    db.lists = db.lists.filter(x => x !== l);
+    saveLocal();
+  } else if (confirm('Delete this checklist?')) {
+    l.deleted = true;
+    touch(l);
+  } else return;
   renderHome();
 }
 
-/* ---------- steps & timers ---------- */
-// "Brush teeth @2m" -> { text: 'Brush teeth', secs: 120 }.  Bare number = minutes.
+/* ================= steps & timers ================= */
+// "Grind beans @40s" -> { text: 'Grind beans', secs: 40 }.  Bare number = minutes.
 function parseStep(line) {
   const m = line.match(/\s+@(?:(\d+):(\d{1,2})|(\d+)\s*(s|m|min)?)$/i);
   if (!m) return { text: line, secs: 0 };
@@ -156,32 +333,50 @@ function parseStep(line) {
   return { text: line.slice(0, m.index).trim(), secs };
 }
 const mmss = s => (s < 0 ? '-' : '') + Math.floor(Math.abs(s) / 60) + ':' + String(Math.abs(s) % 60).padStart(2, '0');
+const pad2 = i => String(i).padStart(2, '0');
 
-/* ---------- runner ---------- */
+/* ================= runner ================= */
 function start(id) {
   const list = byId(id);
   const steps = list.items.map(parseStep);
-  run = { title: list.title, steps, at: 0, state: steps.map(() => null),
-          times: steps.map(() => 0), enteredAt: Date.now(), deadline: 0, rang: false, history: [] };
-  $('runTitle').textContent = run.title;
+  run = { title: list.title, steps, at: 0, state: steps.map(() => null), times: steps.map(() => 0),
+          enteredAt: Date.now(), deadline: 0, rang: false, history: [] };
+  $('listName').textContent = list.title;
   renderRun();
   show('runner');
   navigator.wakeLock?.request('screen').catch(() => {});
 }
+function stepLine(i, cls) {
+  const b = make('button', { className: `line ${cls}`, onclick: () => jump(i) });
+  const done = run.state[i] !== null;
+  b.innerHTML = `<span class="num">${done ? (run.state[i] ? '✓' : '–') : pad2(i + 1)}</span>` +
+                `<span class="txt">${esc(run.steps[i].text)}</span>` +
+                `<span class="num">${run.times[i] ? mmss(Math.round(run.times[i] / 1000))
+                                     : run.steps[i].secs ? mmss(run.steps[i].secs) : ''}</span>`;
+  return b;
+}
 function renderRun() {
-  $('steps').innerHTML = '';
-  run.steps.forEach((step, i) => {
-    const li = document.createElement('li');
-    li.className = run.state[i] !== null ? 'done' : i === run.at ? 'current' : '';
-    const took = run.times[i] ? ` <span class="muted">${mmss(Math.round(run.times[i] / 1000))}</span>` : '';
-    li.innerHTML = `<span class="mark">${run.state[i] === true ? '✓' : run.state[i] === false ? '–' : '○'}</span>` +
-                   `<span class="grow">${step.text}${took}</span>` +
-                   (i === run.at ? '<span id="timer" class="muted"></span>' : '');
-    li.onclick = () => { snapshot(); leaveStep(); run.at = i; enterStep(); };
-    $('steps').append(li);
+  const done = [], todo = [];
+  run.steps.forEach((_, i) => {
+    if (run.state[i] !== null) done.push(stepLine(i, 'checked'));
+    else if (i > run.at) todo.push(stepLine(i, ''));
   });
-  $('prog').max = run.steps.length;
-  $('prog').value = run.state.filter(s => s !== null).length;
+  $('log').replaceChildren(...done);
+  $('queue').replaceChildren(...todo);
+
+  const over = run.at >= run.steps.length;
+  $('stepNo').textContent = over ? 'Complete' : `${pad2(run.at + 1)} / ${pad2(run.steps.length)}`;
+  if (over) {
+    const total = Math.round(run.times.reduce((a, b) => a + b, 0) / 1000);
+    const skipped = run.state.filter(s => s === false).length;
+    $('challenge').textContent = 'All done.';
+    $('clock').textContent = `${mmss(total)} total` + (skipped ? ` · ${skipped} skipped` : '');
+    $('clock').className = '';
+  } else {
+    $('challenge').textContent = run.steps[run.at].text;
+    $('clock').classList.toggle('hidden', !run.deadline);
+  }
+  $('stage').classList.remove('fresh'); void $('stage').offsetWidth; $('stage').classList.add('fresh');
   tick();
 }
 function snapshot() {
@@ -190,27 +385,20 @@ function snapshot() {
 }
 function undo() {
   const prev = run?.history.pop();
-  if (!prev) return;
-  Object.assign(run, prev);
-  enterStep();
+  if (prev) { Object.assign(run, prev); enterStep(); }
 }
-function leaveStep() {
-  if (run.at < run.steps.length) run.times[run.at] += Date.now() - run.enteredAt;
-}
+function leaveStep() { if (run.at < run.steps.length) run.times[run.at] += Date.now() - run.enteredAt; }
 function enterStep() {
   run.enteredAt = Date.now();
   run.rang = false;
   const step = run.steps[run.at];
   run.deadline = step?.secs ? Date.now() + step.secs * 1000 : 0;
   renderRun();
-  if (run.at >= run.steps.length) {
-    const total = Math.round(run.times.reduce((a, b) => a + b, 0) / 1000);
-    const skipped = run.state.filter(s => s === false).length;
-    speak(`Checklist complete in ${Math.round(total / 60)} minutes.` + (skipped ? ` ${skipped} skipped.` : ''));
-  } else {
-    speak(step.text);
-  }
+  speak(run.at >= run.steps.length
+    ? `Checklist complete in ${Math.round(run.times.reduce((a, b) => a + b, 0) / 60000)} minutes.`
+    : step.text);
 }
+function jump(i) { snapshot(); leaveStep(); run.at = i; enterStep(); }
 function mark(done) {
   if (run.at >= run.steps.length) return;
   snapshot();
@@ -227,15 +415,14 @@ function quit() { if (listening) toggleMic(); run = null; renderHome(); }
 
 setInterval(tick, 1000);
 function tick() {
-  const el = $('timer');
-  if (!run || !el || !run.deadline) return;
+  if (!run || !run.deadline || run.at >= run.steps.length) return;
   const left = Math.round((run.deadline - Date.now()) / 1000);
-  el.textContent = mmss(left);
-  el.className = left < 0 ? 'warn' : 'muted';
+  $('clock').textContent = mmss(left);
+  $('clock').className = left < 0 ? 'over' : '';
   if (left <= 0 && !run.rang) { run.rang = true; speak('Time is up.'); }
 }
 
-/* ---------- voice ---------- */
+/* ================= voice ================= */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const LANG = navigator.language || 'en-US';
 let rec = null, listening = false, speaking = false;
@@ -259,29 +446,33 @@ const HANDLERS = { done: () => mark(true), skip: () => mark(false), next: () => 
                    back: () => move(-1), repeat: () => move(0), undo, stop: () => toggleMic() };
 
 function toggleMic() {
-  if (listening) { listening = false; rec?.stop(); $('micBtn').textContent = 'Start voice'; return; }
-  if (!SR) { alert('This browser has no speech recognition. Chrome, Edge or Safari works; Firefox does not.'); return; }
+  if (listening) { listening = false; rec?.stop(); micUI(); return; }
+  if (!SR) return alert('This browser has no speech recognition. Chrome, Edge or Safari works; Firefox does not.');
   rec = new SR();
   rec.lang = LANG;
   rec.continuous = true;
   rec.interimResults = false;
   rec.onresult = e => {
-    const text = e.results[e.results.length - 1][0].transcript;
-    $('heard').textContent = '“' + text.trim() + '”';
+    const text = e.results[e.results.length - 1][0].transcript.trim();
+    $('heard').textContent = '“' + text + '”';
     HANDLERS[matchCommand(text)]?.();
   };
   // ponytail: browsers end recognition on silence/after each phrase — just restart it.
   rec.onend = () => { if (listening && !speaking) try { rec.start() } catch {} };
-  rec.onerror = e => { if (e.error === 'not-allowed') { listening = false; $('micBtn').textContent = 'Start voice'; } };
+  rec.onerror = e => { if (e.error === 'not-allowed') { listening = false; micUI(); $('heard').textContent = 'Microphone blocked — allow it in the address bar.'; } };
   listening = true;
   rec.start();
-  $('micBtn').textContent = 'Stop voice';
+  micUI();
   move(0);
 }
-
+function micUI() {
+  $('micBtn').textContent = listening ? 'Stop voice' : 'Start voice';
+  $('dot').className = listening ? 'on' : '';
+  if (!listening) $('heard').textContent = '';
+}
 function speak(text) {
   speechSynthesis.cancel();
-  if (listening) { speaking = true; rec.stop(); }           // don't let the mic hear the app
+  if (listening) { speaking = true; rec.stop(); }        // don't let the mic hear the app
   const u = new SpeechSynthesisUtterance(text);
   u.lang = LANG;
   u.onend = u.onerror = () => {
@@ -291,123 +482,210 @@ function speak(text) {
   speechSynthesis.speak(u);
 }
 
-/* ---------- accounts & sync ---------- */
+/* ================= sync ================= */
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 let sb = null, user = null;
 
-const toRow = l => ({ id: l.id, owner: user.id, title: l.title, items: l.items,
-                      share_token: l.shareToken ?? null, deleted: !!l.deleted,
-                      updated_at: new Date(l.updatedAt).toISOString() });
-const fromRow = r => ({ id: r.id, title: r.title, items: r.items, updatedAt: Date.parse(r.updated_at),
-                        deleted: r.deleted, shareToken: r.share_token ?? undefined });
+const toRow = l => ({ id: l.id, owner: l.owner ?? user.id, title: l.title, items: l.items,
+                      share_token: l.shareToken ?? null, share_mode: l.shareMode ?? 'copy',
+                      deleted: !!l.deleted, updated_at: new Date(l.updatedAt).toISOString() });
+const fromRow = r => ({ id: r.id, owner: r.owner, title: r.title, items: r.items,
+                        updatedAt: Date.parse(r.updated_at), deleted: r.deleted,
+                        shareToken: r.share_token ?? undefined, shareMode: r.share_mode });
 
-// ponytail: last-write-wins per list, whole-list granularity. Two devices editing
-// the *same* list offline still lose one side's edit — needs per-item merge if that bites.
-function merge(local, rows) {
-  const lists = [...local];
+// ponytail: last-write-wins per list, whole-list granularity. Two people editing the
+// same list at the same moment still lose one side — needs per-item merge if that bites.
+function merge(local, rows, uid) {
+  const seen = new Map(rows.map(r => [r.id, r]));
+  // Someone else's list that the server no longer returns = access revoked or owner
+  // deleted it. Our own lists are never dropped this way, so a failed push can't eat them.
+  const lists = local.filter(l => !(l.owner && l.owner !== uid && !seen.has(l.id)));
   for (const r of rows) {
     const i = lists.findIndex(l => l.id === r.id);
     if (i < 0) lists.push(fromRow(r));
     else if (Date.parse(r.updated_at) > lists[i].updatedAt) lists[i] = fromRow(r);
   }
-  const seen = new Map(rows.map(r => [r.id, Date.parse(r.updated_at)]));
-  return { lists, outbox: lists.filter(l => !(seen.get(l.id) >= l.updatedAt)) };
+  return { lists, outbox: lists.filter(l => !(Date.parse(seen.get(l.id)?.updated_at) >= l.updatedAt)) };
 }
-
 async function push(lists) {
   if (!user || !lists.length) return;
-  await sb.from('lists').upsert(lists.map(toRow));
+  const { error } = await sb.from('lists').upsert(lists.map(toRow));
+  if (!error) for (const l of lists) l.owner ??= user.id;
+  saveLocal();
 }
 async function sync() {
-  if (!user) return;
+  if (!user) return renderHome();
   const { data, error } = await sb.from('lists').select('*');
   if (error) return;
-  const { lists, outbox } = merge(db.lists, data);
+  const { lists, outbox } = merge(db.lists, data, user.id);
   db.lists = lists;
-  save_();
+  saveLocal();
   await push(outbox);
   if (!run) renderHome();
 }
 
-/* ---------- sharing: recipient gets a copy, not a subscription ---------- */
-async function share(l) {
+/* ================= sharing ================= */
+function renderShare(l) {
+  const box = $('shareBody');
+  box.replaceChildren();
+  if (!user) {
+    box.innerHTML = '<p class="note">Sign in to share this checklist with someone.</p>';
+    box.append(button('Sign in', () => showAuth('in')));
+    return;
+  }
+  if (editing === null) { box.innerHTML = '<p class="note">Save the checklist first, then you can share it.</p>'; return; }
+  if (!mine(l)) { box.innerHTML = '<p class="note">Shared with you by someone else. Your edits are visible to everyone on the list.</p>'; return; }
+
+  if (!l.shareToken) {
+    box.innerHTML = '<p class="note">Two ways to hand this list to someone.</p>';
+    box.append(make('div', { className: 'row' }, [
+      button('Send a copy', () => setShare(l, 'copy')),
+      button('Share live', () => setShare(l, 'live')),
+    ]));
+    box.append(make('p', { className: 'note', style: 'margin-top:.6rem',
+      textContent: 'A copy is theirs alone and drifts apart from yours. Live means one list, both of you editing it.' }));
+    return;
+  }
+  const url = shareUrl(l);
+  box.innerHTML = `<p class="note">${l.shareMode === 'live'
+    ? 'Anyone who opens this link joins <b>this</b> list and can edit it.'
+    : 'Anyone who opens this link gets their own copy.'}</p>`;
+  box.append(make('input', { id: 'linkOut', readOnly: true, value: url, onclick: e => e.target.select() }));
+  box.append(make('div', { className: 'row', style: 'margin-top:.6rem' }, [
+    button('Send link', () => sendLink(l), 'btn go'),
+    button('Stop sharing', () => unshare(l)),
+  ]));
+}
+const shareUrl = l => location.href.split('#')[0] + '#share=' + l.shareToken;
+
+function setShare(l, mode) {
   l.shareToken ??= crypto.randomUUID();
+  l.shareMode = mode;
   touch(l);
-  const url = location.href.split('#')[0] + '#share=' + l.shareToken;
+  renderShare(l);
+}
+async function sendLink(l) {
+  const url = shareUrl(l);
   if (navigator.share) return navigator.share({ title: l.title, url }).catch(() => {});
   await navigator.clipboard?.writeText(url).catch(() => {});
-  prompt('Share link (copied to clipboard):', url);
+  $('linkOut').select();
+  note($('shareBody'), 'Link copied.');
 }
-function unshare() {
-  const l = byId(editing);
-  if (!l?.shareToken || !confirm('Old links stop working. Continue?')) return;
+function unshare(l) {
+  if (!confirm('Old links stop working. People already on the list lose access. Continue?')) return;
+  sb.from('shares').delete().eq('list_id', l.id);
   delete l.shareToken;
+  l.shareMode = 'copy';
   touch(l);
-  $('unshareBtn').classList.add('hidden');
+  renderShare(l);
 }
-async function importShared(token) {
+async function openShareLink(token) {
   history.replaceState(null, '', location.pathname);
   if (!sb) return alert('Sync is not configured, so share links cannot be opened.');
   const { data } = await sb.rpc('shared_list', { token });
   const row = data?.[0];
-  if (!row) return alert('That share link is not valid any more.');
+  if (!row) return alert('That link is no longer valid. Ask for a new one.');
+  if (row.share_mode === 'live') {
+    if (!user) { localStorage.pendingInvite = token; return showAuth('up', `Sign in to join “${row.title}”.`); }
+    await sb.rpc('accept_invite', { token });
+    await sync();
+    return;
+  }
   if (!confirm(`Add “${row.title}” (${row.items.length} steps) to your checklists?`)) return;
-  const copy = { id: crypto.randomUUID(), title: row.title, items: row.items };   // fresh id, no token: independent copy
+  const copy = { id: crypto.randomUUID(), title: row.title, items: row.items };   // fresh id, no token: independent
   db.lists.push(copy);
   touch(copy);
   renderHome();
 }
 
-/* ---------- auth ---------- */
+/* ================= accounts ================= */
+let authMode = 'in';
+function showAuth(mode, message = '') {
+  setMode(mode);
+  note($('authNote'), message);
+  show('auth');
+}
+function setMode(mode) {
+  authMode = mode;
+  const up = mode === 'up';
+  $('tabIn').setAttribute('aria-selected', !up);
+  $('tabUp').setAttribute('aria-selected', up);
+  $('authGo').textContent = up ? 'Create account' : 'Sign in';
+  $('authPass').autocomplete = up ? 'new-password' : 'current-password';
+  $('authHead').textContent = up ? 'Keep your checklists everywhere' : 'Welcome back';
+  $('authLede').textContent = up
+    ? 'One account syncs every device and lets you share a list with someone else.'
+    : 'Sign in to pull your checklists onto this device.';
+}
+function note(target, text, bad = false) {
+  target.className = bad ? 'note bad' : 'note';
+  target.textContent = text;
+}
+$('authForm').onsubmit = async e => {
+  e.preventDefault();
+  const email = $('authEmail').value.trim(), password = $('authPass').value;
+  note($('authNote'), 'Working…');
+  const { data, error } = authMode === 'up'
+    ? await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.href.split('#')[0] } })
+    : await sb.auth.signInWithPassword({ email, password });
+  if (error) return note($('authNote'), error.message, true);
+  if (authMode === 'up' && !data.session) {
+    return note($('authNote'), data.user?.identities?.length === 0
+      ? 'That email already has an account. Sign in instead.'
+      : 'Almost there — open the confirmation link in your inbox.');
+  }
+  // onAuthStateChange takes it from here.
+};
+async function magicLink() {
+  const email = $('authEmail').value.trim();
+  if (!email) return note($('authNote'), 'Enter your email first.', true);
+  note($('authNote'), 'Working…');
+  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.href.split('#')[0] } });
+  note($('authNote'), error ? error.message : 'Check your inbox for the sign-in link.', !!error);
+}
+
 if (SUPABASE_URL && SUPABASE_ANON_KEY) {
   const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
   sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  sb.auth.onAuthStateChange((_e, session) => { user = session?.user ?? null; renderAuth(); sync(); });
-  addEventListener('focus', sync);
-}
-function renderAuth() {
-  const bar = $('auth');
-  bar.innerHTML = '';
-  if (!sb) { bar.classList.add('hidden'); return; }
-  if (user) {
-    bar.innerHTML = `<span class="grow muted">${user.email}</span>`;
-    bar.append(btn('Sync', sync), btn('Sign out', () => sb.auth.signOut()));
-  } else {
-    const input = Object.assign(document.createElement('input'), { type: 'email', placeholder: 'you@example.com' });
-    bar.append(input, btn('Email me a link', async () => {
-      const { error } = await sb.auth.signInWithOtp({
-        email: input.value.trim(), options: { emailRedirectTo: location.href.split('#')[0] } });
-      alert(error ? error.message : 'Check your inbox for the sign-in link.');
-    }));
-  }
-  renderHome();
+  sb.auth.onAuthStateChange(async (_e, session) => {
+    user = session?.user ?? null;
+    if (user && localStorage.pendingInvite) {
+      await sb.rpc('accept_invite', { token: localStorage.pendingInvite });
+      delete localStorage.pendingInvite;
+    }
+    sync();
+  });
+  addEventListener('focus', () => user && sync());
 }
 
-/* ---------- boot ---------- */
-Object.assign(window, { edit, save, del, start, mark, move, undo, quit, toggleMic, renderHome, unshare });
-if (!SR) $('support').textContent = 'Voice control needs Chrome, Edge or Safari — this browser lacks the Web Speech API.';
-renderAuth();
+/* ================= boot ================= */
+Object.assign(window, { edit, save, removeList, start, mark, move, undo, quit, toggleMic, renderHome, setMode, magicLink });
+if (!SR) $('support').textContent = 'Voice control needs Chrome, Edge or Safari — this browser has no Web Speech API.';
+setMode('in');
+renderHome();
 navigator.serviceWorker?.register('sw.js').catch(() => {});
-const shared = location.hash.match(/^#share=([0-9a-f-]{36})$/i);
-if (shared) importShared(shared[1]);
+const invite = location.hash.match(/^#share=([0-9a-f-]{36})$/i);
+if (invite) openShareLink(invite[1]);
 
 /* ponytail: self-check for the fiddly logic. Open index.html#test, read the console. */
 if (location.hash === '#test') {
   const eq = (a, b) => console.assert(JSON.stringify(a) === JSON.stringify(b), a, '!==', b);
   eq(matchCommand('Okay, done!'), 'done');
   eq(matchCommand('undo that'), 'undo');
-  eq(matchCommand('abandoned'), null);          // must not match "done" mid-word
-  eq(parseStep('Brush teeth @2m'), { text: 'Brush teeth', secs: 120 });
+  eq(matchCommand('abandoned'), null);                       // must not match "done" mid-word
+  eq(parseStep('Grind beans @40s'), { text: 'Grind beans', secs: 40 });
   eq(parseStep('Stretch @1:30'), { text: 'Stretch', secs: 90 });
   eq(parseStep('Email @work'), { text: 'Email @work', secs: 0 });
-  const row = (id, t, at) => ({ id, title: t, items: [], deleted: false, share_token: null,
-                                updated_at: new Date(at).toISOString() });
-  eq(merge([], [row('a', 'A', 10)]).lists.length, 1);                        // remote-only arrives
-  eq(merge([], [row('a', 'A', 10)]).outbox.length, 0);                       // and is not echoed back
-  eq(merge([{ id: 'b', title: 'B', items: [], updatedAt: 5 }], []).outbox.length, 1);   // local-only goes up
-  eq(merge([{ id: 'a', title: 'old', items: [], updatedAt: 5 }], [row('a', 'new', 10)]).lists[0].title, 'new');
-  eq(merge([{ id: 'a', title: 'mine', items: [], updatedAt: 20 }], [row('a', 'old', 10)]).lists[0].title, 'mine');
-  eq(merge([{ id: 'a', title: 'mine', items: [], updatedAt: 20 }], [row('a', 'old', 10)]).outbox.length, 1);
+  eq(esc('<img src=x onerror=alert(1)>'), '&lt;img src=x onerror=alert(1)&gt;');
+  const row = (id, t, at, owner = 'me') => ({ id, owner, title: t, items: [], deleted: false,
+    share_token: null, share_mode: 'copy', updated_at: new Date(at).toISOString() });
+  eq(merge([], [row('a', 'A', 10)], 'me').lists.length, 1);                       // remote arrives
+  eq(merge([], [row('a', 'A', 10)], 'me').outbox.length, 0);                      // and is not echoed
+  eq(merge([{ id: 'b', title: 'B', items: [], updatedAt: 5 }], [], 'me').outbox.length, 1);   // local goes up
+  eq(merge([{ id: 'a', title: 'old', items: [], updatedAt: 5 }], [row('a', 'new', 10)], 'me').lists[0].title, 'new');
+  eq(merge([{ id: 'a', title: 'mine', items: [], updatedAt: 20 }], [row('a', 'old', 10)], 'me').lists[0].title, 'mine');
+  eq(merge([{ id: 's', owner: 'them', title: 'S', items: [], updatedAt: 5 }], [], 'me').lists.length, 0); // revoked
+  eq(merge([{ id: 'k', owner: 'me', title: 'K', items: [], updatedAt: 5 }], [], 'me').lists.length, 1);   // mine kept
   console.log('self-check finished');
 }
 </script>
