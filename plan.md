@@ -1,139 +1,215 @@
-# Checkoff — plan
+# Checkoff
 
-Hands-free checklists for daily repetitive tasks. Voice checks steps off, app speaks the next one.
+Hands-free checklists for daily repetitive tasks. The app speaks a step, you say
+"done", it checks it off and speaks the next one — so the routine runs the same
+way every time without touching the phone.
+
+Last updated 2026-08-12.
+
+## Where everything is
+
+| Thing | Where |
+|-------|-------|
+| Live app | https://andreasmaskos.github.io/Checkoff/ |
+| Repo | https://github.com/AndreasMaskos/Checkoff (public) |
+| Database + auth | Supabase project **CheckoffLists**, `vgrrekmdpfgftuseawze` |
+| Hosting | GitHub Pages, `main` branch, root — redeploys ~30s after a push |
 
 ## Status
 
 | # | Feature | State |
 |---|---------|-------|
-| 1 | Checklist CRUD + localStorage | done |
-| 2 | Voice control (recognize commands, speak steps) | done |
+| 1 | Checklist CRUD, localStorage | done |
+| 2 | Voice control — speaks steps, hears commands | done |
 | 3 | Undo | done |
 | 4 | Per-step timers | done |
-| 5 | PWA (installable, offline) | done |
-| 6 | Accounts + sync | done — live on project CheckoffLists |
-| 7 | Sharing — copy link and live link | done |
-| 8 | Deploy | live at https://andreasmaskos.github.io/Checkoff/ |
-| 9 | Sign up / sign in screen (password + magic link) | done |
+| 5 | PWA — installable, works offline | done |
+| 6 | Accounts + sync | done, live |
+| 7 | Sharing — copy link and live link | done, live |
+| 8 | Deployed to GitHub Pages | done |
+| 9 | Sign up / sign in screen | done |
 | 10 | Visual design pass | done |
+| — | Supabase Auth → URL Configuration redirect URLs | **verify in dashboard** |
 
-Schema changes go in `supabase/migrations/` and are applied to the production
-database by the GitHub integration on push to main — don't hand-edit tables in
-the dashboard, or the repo stops describing reality.
+The last row is the one thing that can't be checked from code: magic links and
+signup confirmations bounce to Supabase's default `localhost:3000` unless
+*Authentication → URL Configuration* lists the Pages URL (and
+`http://localhost:8000/` for local work).
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `index.html` | The whole app: UI, voice, timers, undo, sync client |
-| `config.js` | Supabase URL + anon key. Empty = sync off, everything else still works |
+| `index.html` | The entire app — markup, design, voice, timers, undo, sync, sharing, auth |
+| `config.js` | Supabase URL + publishable key. Empty = sync off, everything else still works |
 | `manifest.json` | PWA metadata (installable, standalone, portrait) |
 | `sw.js` | Service worker, stale-while-revalidate app shell cache |
-| `icon-192.png`, `icon-512.png`, `icon.svg` | App icons |
+| `icon.svg`, `icon-192.png`, `icon-512.png` | App icons (192/512 generated from the SVG with `qlmanage` + `sips`) |
+| `supabase/migrations/*.sql` | Schema, in order. Source of truth for the database |
+| `supabase/config.toml` | Marks the directory for the Supabase GitHub integration |
 
-## Feature notes
+One HTML file on purpose: no build step, no bundler, no dependency to keep
+current. The only runtime import is supabase-js from esm.sh, and it is loaded
+only when `config.js` has credentials.
 
-### Per-step timers
-Append `@<duration>` to a step line in the editor:
+## Running it locally
+
+Voice and service workers need a secure context — `file://` will not do:
 
 ```
-Brush teeth @2m
-Cold rinse @30s
-Stretch @1:30
-Coffee @3          (bare number = minutes)
+python3 -m http.server 8000     # then http://localhost:8000
 ```
 
-Countdown shows on the current step; at zero the app says "time is up". Steps
-without `@` have no countdown. Actual elapsed time per step is recorded either
-way and shown in the summary after the run.
+**Tests:** open `index.html#test` and read the console. Asserts cover the voice
+command matcher, the `@duration` parser, HTML escaping, and the sync merge in
+both directions. No framework, no runner — if something goes red it prints.
 
-### Undo
-Button, or say "undo" / "rückgängig". Restores the last 20 states (check, skip,
-navigation). Only within a run — closing the run drops the stack.
+## Data model
 
-### Accounts + sync
-Supabase magic-link email login. No passwords, no server code of ours.
+**On the device** (`localStorage.checkoff`):
 
-**Setup (already done for project CheckoffLists — kept for reference / a second project):**
-1. Create a free project at supabase.com.
-2. Push `supabase/migrations/*.sql`, or paste the same SQL into the SQL editor:
-   ```sql
-   create table lists (
-     id          uuid primary key,
-     owner       uuid not null references auth.users on delete cascade,
-     title       text not null,
-     items       jsonb not null default '[]',
-     share_token uuid,                               -- null = private
-     deleted     boolean not null default false,     -- tombstone, so deletes sync
-     updated_at  timestamptz not null default now()
-   );
-   create index on lists (share_token);
-   alter table lists enable row level security;
+```js
+{ lists: [{
+    id,          // uuid, stable across devices
+    title,
+    items,       // array of raw step lines, "Grind beans @40s"
+    updatedAt,   // ms epoch, drives last-write-wins
+    owner,       // uuid once synced; absent = local-only, treated as mine
+    deleted,     // tombstone
+    shareToken,  // uuid or absent
+    shareMode,   // 'copy' | 'live'
+}]}
+```
 
-   create policy "owner" on lists for all
-     using (auth.uid() = owner) with check (auth.uid() = owner);
+Run state — which steps are checked, elapsed times, the undo stack — is
+deliberately **not** in here. It lives in memory for the duration of a run and
+never syncs, so two people running the same shared list never collide.
 
-   -- Share links resolve through this function, never through a policy: a policy
-   -- like "share_token is not null" would let any signed-in user list everyone
-   -- else's shared lists. security definer + exact token match does not.
-   create function shared_list(token uuid) returns setof lists
-     language sql security definer stable set search_path = public as $$
-       select * from lists where share_token = token and not deleted
-     $$;
-   ```
-3. Authentication → URL Configuration → add your app's URL to redirect URLs.
-4. Settings → API → copy Project URL + anon key into `config.js`.
+**On the server:** `lists` (one row per checklist) and `shares` (one row per
+member of a live list), both under RLS. Full definitions live in the migrations;
+don't hand-edit tables in the dashboard or the repo stops describing reality.
 
-One row per list. Sync is last-write-wins **per list**: on every save and every
-window focus, newer `updated_at` wins in whichever direction. Two devices editing
-*different* lists offline is fine; both editing the *same* list offline loses one
-side. Per-item merge only if that turns out to happen.
+## Sync
 
-### Sharing
-Two modes, chosen per list in the editor. Either way, run state — what is
-checked off right now — is device-local and never syncs, so two people running
-the same list never touch each other's checkmarks.
+Last-write-wins **per list**: on sign-in, on every save, and on window focus, the
+newer `updated_at` wins in whichever direction. Both devices editing *different*
+lists offline is fine. Both editing the *same* list offline loses one side —
+per-item merge only if that turns out to happen for real.
 
-| Mode | Link does | Recipient |
-|------|-----------|-----------|
-| **Send a copy** | `shared_list(token)` returns the content | Gets an independent list with a fresh id; the two drift apart. No account needed |
-| **Share live** | `accept_invite(token)` inserts a `shares` row | Joins *this* list and can edit it. Needs an account |
+`merge()` also drops local lists that are owned by someone else and no longer
+returned by the server — that's how "the owner revoked my access" and "I left the
+list" clean up. It never drops lists we own, so a failed push cannot eat them.
 
-Everyone on a live list is an equal editor — no view-only role until someone
-asks for one. RLS grants members write access to the whole row, which is more
-than we mean, so the `lists_member_guard` trigger is the real boundary: members
-change content, only the owner transfers, deletes, or mints links.
+## Sharing
 
-"Stop sharing" clears the token and removes every member. Copies already made
-are unaffected.
+Two modes, picked per list in the editor.
 
-**Watch out:** policies on `lists` and `shares` must not query each other
-directly — that recursed (42P17) and 500'd every read until
-`20260811150000_fix_policy_recursion.sql` moved both lookups into
-`security definer` helpers (`is_member`, `owns_list`).
+| Mode | Link does | Recipient gets |
+|------|-----------|----------------|
+| **Send a copy** | `shared_list(token)` returns the content | An independent list with a fresh id; the two drift apart. No account needed |
+| **Share live** | `accept_invite(token)` inserts a `shares` row | Membership of *this* list, with edit rights. Account required |
 
-### Accounts
+Same link shape (`…/#share=<uuid>`); the app resolves which mode it is on open.
+If a live link is opened while signed out, the token is stashed in
+`localStorage.pendingInvite` and redeemed right after sign-in.
+
+Everyone on a live list is an equal editor — no view-only role until someone asks
+for one. "Stop sharing" clears the token and removes every member; copies already
+made are unaffected.
+
+## Accounts
+
 Email + password sign up and sign in on a dedicated screen, magic link as the
-alternative. An account is optional: with no account the app is fully usable and
-purely local. Signing in merges what's on the device with what's on the server.
+alternative. An account is **optional** — with none, the app is fully usable and
+purely local; signing in later merges the device into the account rather than
+replacing it.
 
-## Running it
+## Voice
 
-Voice and service workers need a secure context — `file://` won't do it:
+Say any of these while the mic is on. Both English and German are matched, and
+the recognizer's language follows the browser locale.
 
-```
-python3 -m http.server 8000    # then http://localhost:8000
-```
+| Command | Words |
+|---------|-------|
+| check it off | done, check, yes, ok, complete, erledigt, fertig, ja, passt |
+| skip | skip, no, überspringen, nein |
+| next / back | next, weiter · back, previous, zurück |
+| repeat | repeat, again, nochmal, wiederhol |
+| undo | undo, rückgängig |
+| stop listening | stop, pause, exit, halt, ende |
 
-For phone use, deploy anywhere with HTTPS (GitHub Pages, Netlify, Vercel — it's
-static files) and "Add to Home Screen".
+Two mechanics that matter: the mic is muted while the app speaks (otherwise it
+hears itself and checks off the step it just read), and recognition is restarted
+on every `onend` because browsers end it after each phrase of silence.
 
-Self-check for the voice command matcher: open `index.html#test`, read the console.
+## Timers and undo
+
+Append `@<duration>` to a step line: `@2m`, `@30s`, `@1:30`, or `@3` for bare
+minutes. The countdown sits on the current step, turns red past zero, and the app
+says "time is up". Steps without `@` have no countdown, but elapsed time is
+recorded for every step and totalled in the completion summary.
+
+Undo is a 20-deep snapshot stack covering checks, skips and navigation, by button
+or by voice. It is per run — leaving the runner drops it.
+
+## Design direction
+
+Anchored on the **aviation preflight checklist**, because that is literally the
+interaction: challenge, response, next item.
+
+- The runner is a teleprompter, not a checkbox list. Done steps collapse into a
+  dense monospace log, the current step fills the viewport for across-the-room
+  legibility, upcoming steps sit dimmed below. The premise is that you are *not*
+  looking at the phone up close.
+- Colour is state, never decoration: green confirms, amber counts down, red is
+  overdue. Nothing else is coloured.
+- Sans/mono contrast carries the personality instead of a webfont — an
+  offline-first PWA should not be fetching fonts.
+- `01 / 07` numbering earns its place because a checklist genuinely is a sequence
+  and the number is how you find your place again.
+
+## Decisions and gotchas worth remembering
+
+- **RLS policies on `lists` and `shares` must not query each other.** They did,
+  and Postgres recursed (42P17) — every read returned 500. Fixed by moving both
+  lookups into `security definer` helpers (`is_member`, `owns_list`) in
+  `20260811150000_fix_policy_recursion.sql`.
+- **Share links resolve through a function, never a policy.** A policy like
+  `share_token is not null` would let any signed-in user enumerate everyone's
+  shared lists. `security definer` + exact token match cannot leak more than the
+  one list whose token the caller already holds.
+- **RLS gives a live member write access to the whole row**, which is more than
+  "can edit the steps". The `lists_member_guard` trigger is the actual boundary:
+  members change content; only the owner transfers, deletes, or mints links.
+- **List text is HTML-escaped on render.** Cosmetic until lists could arrive from
+  other people; a security boundary from that moment on.
+- **The publishable key in `config.js` is public by design** — it identifies the
+  project, RLS guards the data. `service_role` must never appear in this repo.
+- **Migrations deploy on push to main** via the Supabase GitHub integration.
+  Verified working. Always confirm against the live API afterwards
+  (`curl $URL/rest/v1/lists?select=id -H "apikey: …"`) rather than trusting it.
+- Icons were generated on macOS with `qlmanage -t -s 512` then `sips -z 192 192`
+  — no design tool needed to regenerate them from `icon.svg`.
 
 ## Known limits / not built
 
-- Firefox has no Web Speech API — app warns and falls back to buttons.
-- iOS: mic needs one tap per session, Safari won't open it without a gesture.
-- No run history/streaks, no reminders/notifications.
-- No live co-editing — sharing is copy-only, by design (see above).
-- Wake lock keeps the screen on during a run; not supported on iOS < 16.4.
+- Firefox has no Web Speech API — the app says so and falls back to buttons.
+- iOS needs one tap on "Start voice" per session; Safari will not open the mic
+  without a gesture.
+- Wake lock keeps the screen on during a run; unsupported on iOS < 16.4.
+- No view-only sharing role, no member list, no way to see who joined.
+- No run history, streaks, or reminders/notifications.
+- Magic-link email uses Supabase's shared SMTP on the free tier — a few per hour.
+  Swap in real SMTP before this is used by anyone but us.
+
+## Plausible next steps
+
+Nothing here is committed to; listed so the reasoning isn't re-derived later.
+
+1. Run history — every completed run with its per-step times; the data is already
+   collected, only the storage is missing.
+2. Realtime propagation for live lists (`postgres_changes`, ~5 lines) so a shared
+   list updates without a focus/sync.
+3. Reorder steps by drag, if editing raw lines in the textarea starts to chafe.
+4. A "wake word" so the mic can stay off until called, instead of listening for
+   the whole run.
