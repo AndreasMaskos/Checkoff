@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#2d7d46">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Checkoff</title>
+<style>
+  :root { color-scheme: light dark; --bg:#fff; --fg:#111; --muted:#777; --line:#ddd; --accent:#2d7d46; --warn:#c0392b; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111; --fg:#eee; --muted:#999; --line:#333; --accent:#4ade80; --warn:#ff6b5b; } }
+  * { box-sizing: border-box; }
+  body { margin:0 auto; padding:1rem max(1rem, env(safe-area-inset-left)) 4rem; font:16px/1.5 system-ui, sans-serif;
+         background:var(--bg); color:var(--fg); max-width:40rem; }
+  h1 { font-size:1.3rem; margin:0 0 1rem; }
+  button { font:inherit; padding:.6rem 1rem; border:1px solid var(--line); border-radius:.5rem;
+           background:transparent; color:inherit; cursor:pointer; }
+  button.primary { background:var(--accent); color:#fff; border-color:transparent; }
+  input, textarea { font:inherit; width:100%; padding:.6rem; border:1px solid var(--line);
+                    border-radius:.5rem; background:transparent; color:inherit; }
+  textarea { min-height:12rem; }
+  .row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; margin:.75rem 0; }
+  .grow { flex:1; }
+  ul { list-style:none; padding:0; }
+  li { display:flex; gap:.75rem; align-items:baseline; padding:.6rem 0; border-bottom:1px solid var(--line); }
+  li.done { color:var(--muted); text-decoration:line-through; }
+  li.current { font-weight:600; font-size:1.4rem; text-decoration:none; }
+  li .mark { width:1.5rem; flex:none; text-align:center; }
+  .muted { color:var(--muted); font-size:.875rem; }
+  .warn { color:var(--warn); }
+  .hidden { display:none; }
+  #heard { min-height:1.5rem; font-style:italic; }
+  #auth { border-bottom:1px solid var(--line); padding-bottom:.5rem; }
+  #auth input { max-width:16rem; }
+  progress { width:100%; height:.5rem; }
+</style>
+</head>
+<body>
+
+<section id="home">
+  <h1>Checkoff</h1>
+  <div class="row" id="auth"></div>
+  <ul id="lists"></ul>
+  <div class="row"><button class="primary" onclick="edit(null)">New checklist</button></div>
+  <p class="muted" id="support"></p>
+</section>
+
+<section id="editor" class="hidden">
+  <h1>Edit checklist</h1>
+  <div class="row"><input id="title" placeholder="Name, e.g. Morning routine"></div>
+  <div class="row"><textarea id="items" placeholder="One step per line.&#10;Add a timer with @: Brush teeth @2m"></textarea></div>
+  <div class="row">
+    <button class="primary" onclick="save()">Save</button>
+    <button onclick="renderHome()">Cancel</button>
+    <span class="grow"></span>
+    <button id="unshareBtn" class="hidden" onclick="unshare()">Stop sharing</button>
+    <button onclick="del()">Delete</button>
+  </div>
+  <p class="muted">Timers: <code>@2m</code>, <code>@30s</code>, <code>@1:30</code>, <code>@3</code> (minutes).</p>
+</section>
+
+<section id="runner" class="hidden">
+  <h1 id="runTitle"></h1>
+  <progress id="prog" value="0" max="1"></progress>
+  <ul id="steps"></ul>
+  <div class="row">
+    <button class="primary" id="micBtn" onclick="toggleMic()">Start voice</button>
+    <button onclick="mark(true)">Done</button>
+    <button onclick="mark(false)">Skip</button>
+    <button onclick="move(-1)">Back</button>
+    <button onclick="undo()">Undo</button>
+    <button onclick="quit()">Exit</button>
+  </div>
+  <p id="heard" class="muted"></p>
+  <p class="muted">Say: done / skip / next / back / repeat / undo / stop</p>
+</section>
+
+<script type="module">
+const $ = id => document.getElementById(id);
+const btn = (label, fn) => Object.assign(document.createElement('button'), { textContent: label, onclick: fn });
+
+/* ---------- storage ----------
+   One record per list so sync and sharing work per list, not per account.
+   deleted:true is a tombstone — kept so a delete propagates instead of the
+   list resurrecting from another device on the next sync. */
+let db = JSON.parse(localStorage.checkoff || '{"lists":[]}');
+for (const l of db.lists) {                                  // migrate the old blob shape
+  l.id ??= crypto.randomUUID();
+  l.updatedAt ??= Date.now();
+}
+let editing = null, run = null;
+
+const save_ = () => localStorage.checkoff = JSON.stringify(db);
+const byId = id => db.lists.find(l => l.id === id);
+const visible = () => db.lists.filter(l => !l.deleted);
+
+function touch(list) {
+  list.updatedAt = Date.now();
+  save_();
+  push([list]);
+}
+function show(id) {
+  for (const s of document.querySelectorAll('body > section')) s.classList.toggle('hidden', s.id !== id);
+}
+
+/* ---------- home ---------- */
+function renderHome() {
+  $('lists').innerHTML = '';
+  for (const l of visible()) {
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="grow">${l.title}${l.shareToken ? ' <span class="muted">shared</span>' : ''}</span>`;
+    li.append(btn('Start', () => start(l.id)), btn('Edit', () => edit(l.id)));
+    if (user) li.append(btn('Share', () => share(l)));
+    $('lists').append(li);
+  }
+  show('home');
+}
+
+/* ---------- editor ---------- */
+function edit(id) {
+  editing = id;
+  const l = id === null ? { title: '', items: [] } : byId(id);
+  $('title').value = l.title;
+  $('items').value = l.items.join('\n');
+  $('unshareBtn').classList.toggle('hidden', !l.shareToken);
+  show('editor');
+}
+function save() {
+  const fields = {
+    title: $('title').value.trim() || 'Untitled',
+    items: $('items').value.split('\n').map(s => s.trim()).filter(Boolean),
+  };
+  let l;
+  if (editing === null) db.lists.push(l = { id: crypto.randomUUID(), ...fields });
+  else Object.assign(l = byId(editing), fields);
+  touch(l);
+  renderHome();
+}
+function del() {
+  const l = editing !== null && byId(editing);
+  if (l && confirm('Delete this checklist?')) { l.deleted = true; touch(l); }
+  renderHome();
+}
+
+/* ---------- steps & timers ---------- */
+// "Brush teeth @2m" -> { text: 'Brush teeth', secs: 120 }.  Bare number = minutes.
+function parseStep(line) {
+  const m = line.match(/\s+@(?:(\d+):(\d{1,2})|(\d+)\s*(s|m|min)?)$/i);
+  if (!m) return { text: line, secs: 0 };
+  const secs = m[1] !== undefined ? +m[1] * 60 + +m[2]
+             : /^s$/i.test(m[4] || '') ? +m[3]
+             : +m[3] * 60;
+  return { text: line.slice(0, m.index).trim(), secs };
+}
+const mmss = s => (s < 0 ? '-' : '') + Math.floor(Math.abs(s) / 60) + ':' + String(Math.abs(s) % 60).padStart(2, '0');
+
+/* ---------- runner ---------- */
+function start(id) {
+  const list = byId(id);
+  const steps = list.items.map(parseStep);
+  run = { title: list.title, steps, at: 0, state: steps.map(() => null),
+          times: steps.map(() => 0), enteredAt: Date.now(), deadline: 0, rang: false, history: [] };
+  $('runTitle').textContent = run.title;
+  renderRun();
+  show('runner');
+  navigator.wakeLock?.request('screen').catch(() => {});
+}
+function renderRun() {
+  $('steps').innerHTML = '';
+  run.steps.forEach((step, i) => {
+    const li = document.createElement('li');
+    li.className = run.state[i] !== null ? 'done' : i === run.at ? 'current' : '';
+    const took = run.times[i] ? ` <span class="muted">${mmss(Math.round(run.times[i] / 1000))}</span>` : '';
+    li.innerHTML = `<span class="mark">${run.state[i] === true ? '✓' : run.state[i] === false ? '–' : '○'}</span>` +
+                   `<span class="grow">${step.text}${took}</span>` +
+                   (i === run.at ? '<span id="timer" class="muted"></span>' : '');
+    li.onclick = () => { snapshot(); leaveStep(); run.at = i; enterStep(); };
+    $('steps').append(li);
+  });
+  $('prog').max = run.steps.length;
+  $('prog').value = run.state.filter(s => s !== null).length;
+  tick();
+}
+function snapshot() {
+  run.history.push({ at: run.at, state: [...run.state], times: [...run.times] });
+  if (run.history.length > 20) run.history.shift();
+}
+function undo() {
+  const prev = run?.history.pop();
+  if (!prev) return;
+  Object.assign(run, prev);
+  enterStep();
+}
+function leaveStep() {
+  if (run.at < run.steps.length) run.times[run.at] += Date.now() - run.enteredAt;
+}
+function enterStep() {
+  run.enteredAt = Date.now();
+  run.rang = false;
+  const step = run.steps[run.at];
+  run.deadline = step?.secs ? Date.now() + step.secs * 1000 : 0;
+  renderRun();
+  if (run.at >= run.steps.length) {
+    const total = Math.round(run.times.reduce((a, b) => a + b, 0) / 1000);
+    const skipped = run.state.filter(s => s === false).length;
+    speak(`Checklist complete in ${Math.round(total / 60)} minutes.` + (skipped ? ` ${skipped} skipped.` : ''));
+  } else {
+    speak(step.text);
+  }
+}
+function mark(done) {
+  if (run.at >= run.steps.length) return;
+  snapshot();
+  run.state[run.at] = done;
+  leaveStep();
+  run.at++;
+  enterStep();
+}
+function move(d) {
+  if (d) { snapshot(); leaveStep(); run.at = Math.max(0, Math.min(run.steps.length, run.at + d)); }
+  enterStep();
+}
+function quit() { if (listening) toggleMic(); run = null; renderHome(); }
+
+setInterval(tick, 1000);
+function tick() {
+  const el = $('timer');
+  if (!run || !el || !run.deadline) return;
+  const left = Math.round((run.deadline - Date.now()) / 1000);
+  el.textContent = mmss(left);
+  el.className = left < 0 ? 'warn' : 'muted';
+  if (left <= 0 && !run.rang) { run.rang = true; speak('Time is up.'); }
+}
+
+/* ---------- voice ---------- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const LANG = navigator.language || 'en-US';
+let rec = null, listening = false, speaking = false;
+
+// ponytail: substring match, no grammar/NLU. Add fuzzy matching only if misfires show up.
+const COMMANDS = [
+  ['undo',   ['undo', 'rückgängig', 'ruckgangig', 'zurücknehmen']],
+  ['done',   ['done', 'check', 'yes', 'ok', 'okay', 'complete', 'erledigt', 'fertig', 'ja', 'passt']],
+  ['skip',   ['skip', 'no', 'überspringen', 'uberspringen', 'nein']],
+  ['next',   ['next', 'weiter', 'nächste', 'nachste']],
+  ['back',   ['back', 'previous', 'zurück', 'zuruck']],
+  ['repeat', ['repeat', 'again', 'what', 'wiederhol', 'nochmal', 'was']],
+  ['stop',   ['stop', 'pause', 'exit', 'halt', 'ende']],
+];
+function matchCommand(text) {
+  const t = ' ' + text.toLowerCase().replace(/[^\p{L}\s]/gu, ' ').trim() + ' ';
+  for (const [cmd, words] of COMMANDS) if (words.some(w => t.includes(' ' + w))) return cmd;
+  return null;
+}
+const HANDLERS = { done: () => mark(true), skip: () => mark(false), next: () => move(1),
+                   back: () => move(-1), repeat: () => move(0), undo, stop: () => toggleMic() };
+
+function toggleMic() {
+  if (listening) { listening = false; rec?.stop(); $('micBtn').textContent = 'Start voice'; return; }
+  if (!SR) { alert('This browser has no speech recognition. Chrome, Edge or Safari works; Firefox does not.'); return; }
+  rec = new SR();
+  rec.lang = LANG;
+  rec.continuous = true;
+  rec.interimResults = false;
+  rec.onresult = e => {
+    const text = e.results[e.results.length - 1][0].transcript;
+    $('heard').textContent = '“' + text.trim() + '”';
+    HANDLERS[matchCommand(text)]?.();
+  };
+  // ponytail: browsers end recognition on silence/after each phrase — just restart it.
+  rec.onend = () => { if (listening && !speaking) try { rec.start() } catch {} };
+  rec.onerror = e => { if (e.error === 'not-allowed') { listening = false; $('micBtn').textContent = 'Start voice'; } };
+  listening = true;
+  rec.start();
+  $('micBtn').textContent = 'Stop voice';
+  move(0);
+}
+
+function speak(text) {
+  speechSynthesis.cancel();
+  if (listening) { speaking = true; rec.stop(); }           // don't let the mic hear the app
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = LANG;
+  u.onend = u.onerror = () => {
+    speaking = false;
+    if (listening) setTimeout(() => { try { rec.start() } catch {} }, 250);
+  };
+  speechSynthesis.speak(u);
+}
+
+/* ---------- accounts & sync ---------- */
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
+let sb = null, user = null;
+
+const toRow = l => ({ id: l.id, owner: user.id, title: l.title, items: l.items,
+                      share_token: l.shareToken ?? null, deleted: !!l.deleted,
+                      updated_at: new Date(l.updatedAt).toISOString() });
+const fromRow = r => ({ id: r.id, title: r.title, items: r.items, updatedAt: Date.parse(r.updated_at),
+                        deleted: r.deleted, shareToken: r.share_token ?? undefined });
+
+// ponytail: last-write-wins per list, whole-list granularity. Two devices editing
+// the *same* list offline still lose one side's edit — needs per-item merge if that bites.
+function merge(local, rows) {
+  const lists = [...local];
+  for (const r of rows) {
+    const i = lists.findIndex(l => l.id === r.id);
+    if (i < 0) lists.push(fromRow(r));
+    else if (Date.parse(r.updated_at) > lists[i].updatedAt) lists[i] = fromRow(r);
+  }
+  const seen = new Map(rows.map(r => [r.id, Date.parse(r.updated_at)]));
+  return { lists, outbox: lists.filter(l => !(seen.get(l.id) >= l.updatedAt)) };
+}
+
+async function push(lists) {
+  if (!user || !lists.length) return;
+  await sb.from('lists').upsert(lists.map(toRow));
+}
+async function sync() {
+  if (!user) return;
+  const { data, error } = await sb.from('lists').select('*');
+  if (error) return;
+  const { lists, outbox } = merge(db.lists, data);
+  db.lists = lists;
+  save_();
+  await push(outbox);
+  if (!run) renderHome();
+}
+
+/* ---------- sharing: recipient gets a copy, not a subscription ---------- */
+async function share(l) {
+  l.shareToken ??= crypto.randomUUID();
+  touch(l);
+  const url = location.href.split('#')[0] + '#share=' + l.shareToken;
+  if (navigator.share) return navigator.share({ title: l.title, url }).catch(() => {});
+  await navigator.clipboard?.writeText(url).catch(() => {});
+  prompt('Share link (copied to clipboard):', url);
+}
+function unshare() {
+  const l = byId(editing);
+  if (!l?.shareToken || !confirm('Old links stop working. Continue?')) return;
+  delete l.shareToken;
+  touch(l);
+  $('unshareBtn').classList.add('hidden');
+}
+async function importShared(token) {
+  history.replaceState(null, '', location.pathname);
+  if (!sb) return alert('Sync is not configured, so share links cannot be opened.');
+  const { data } = await sb.rpc('shared_list', { token });
+  const row = data?.[0];
+  if (!row) return alert('That share link is not valid any more.');
+  if (!confirm(`Add “${row.title}” (${row.items.length} steps) to your checklists?`)) return;
+  const copy = { id: crypto.randomUUID(), title: row.title, items: row.items };   // fresh id, no token: independent copy
+  db.lists.push(copy);
+  touch(copy);
+  renderHome();
+}
+
+/* ---------- auth ---------- */
+if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+  const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+  sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  sb.auth.onAuthStateChange((_e, session) => { user = session?.user ?? null; renderAuth(); sync(); });
+  addEventListener('focus', sync);
+}
+function renderAuth() {
+  const bar = $('auth');
+  bar.innerHTML = '';
+  if (!sb) { bar.classList.add('hidden'); return; }
+  if (user) {
+    bar.innerHTML = `<span class="grow muted">${user.email}</span>`;
+    bar.append(btn('Sync', sync), btn('Sign out', () => sb.auth.signOut()));
+  } else {
+    const input = Object.assign(document.createElement('input'), { type: 'email', placeholder: 'you@example.com' });
+    bar.append(input, btn('Email me a link', async () => {
+      const { error } = await sb.auth.signInWithOtp({
+        email: input.value.trim(), options: { emailRedirectTo: location.href.split('#')[0] } });
+      alert(error ? error.message : 'Check your inbox for the sign-in link.');
+    }));
+  }
+  renderHome();
+}
+
+/* ---------- boot ---------- */
+Object.assign(window, { edit, save, del, start, mark, move, undo, quit, toggleMic, renderHome, unshare });
+if (!SR) $('support').textContent = 'Voice control needs Chrome, Edge or Safari — this browser lacks the Web Speech API.';
+renderAuth();
+navigator.serviceWorker?.register('sw.js').catch(() => {});
+const shared = location.hash.match(/^#share=([0-9a-f-]{36})$/i);
+if (shared) importShared(shared[1]);
+
+/* ponytail: self-check for the fiddly logic. Open index.html#test, read the console. */
+if (location.hash === '#test') {
+  const eq = (a, b) => console.assert(JSON.stringify(a) === JSON.stringify(b), a, '!==', b);
+  eq(matchCommand('Okay, done!'), 'done');
+  eq(matchCommand('undo that'), 'undo');
+  eq(matchCommand('abandoned'), null);          // must not match "done" mid-word
+  eq(parseStep('Brush teeth @2m'), { text: 'Brush teeth', secs: 120 });
+  eq(parseStep('Stretch @1:30'), { text: 'Stretch', secs: 90 });
+  eq(parseStep('Email @work'), { text: 'Email @work', secs: 0 });
+  const row = (id, t, at) => ({ id, title: t, items: [], deleted: false, share_token: null,
+                                updated_at: new Date(at).toISOString() });
+  eq(merge([], [row('a', 'A', 10)]).lists.length, 1);                        // remote-only arrives
+  eq(merge([], [row('a', 'A', 10)]).outbox.length, 0);                       // and is not echoed back
+  eq(merge([{ id: 'b', title: 'B', items: [], updatedAt: 5 }], []).outbox.length, 1);   // local-only goes up
+  eq(merge([{ id: 'a', title: 'old', items: [], updatedAt: 5 }], [row('a', 'new', 10)]).lists[0].title, 'new');
+  eq(merge([{ id: 'a', title: 'mine', items: [], updatedAt: 20 }], [row('a', 'old', 10)]).lists[0].title, 'mine');
+  eq(merge([{ id: 'a', title: 'mine', items: [], updatedAt: 20 }], [row('a', 'old', 10)]).outbox.length, 1);
+  console.log('self-check finished');
+}
+</script>
+</body>
+</html>
