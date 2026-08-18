@@ -30,6 +30,7 @@ Last updated 2026-08-18.
 | 9 | Sign up / sign in screen — required, and the only screen when signed out | done |
 | 10 | Visual design pass | done |
 | 11 | Photo log — picture or clip + description per step, timestamped | done, live |
+| 12 | Log keeps deleted entries until permanently deleted | done, live |
 | — | Supabase Auth → URL Configuration redirect URLs | **verify in dashboard** |
 
 The last row is the one thing that can't be checked from code: magic links and
@@ -129,8 +130,16 @@ optional description before saving. **Log** on the home row lists everything for
 that checklist, newest first, images inline and clips as players.
 
 ```js
-log_entries: { id, list_id, owner, step, step_text, note, path, created_at }
+log_entries: { id, list_id, owner, step, step_text, note, path, created_at, deleted_at }
 ```
+
+**Deleting is two stages, because a log is a record.** "Delete" only sets
+`deleted_at`: the entry stays in the log, struck through and dated, and its
+button becomes "Delete permanently" — the only thing that removes the file and
+the row. There is no restore; hiding it *was* the reversible half.
+
+Deleting a *checklist* never buries its log either. Tombstoned lists are listed
+on home under "Deleted checklists — logs kept", reachable for their log only.
 
 - `step_text` is a **snapshot**. Renaming a step later must not rewrite what the
   log says was done at the time.
@@ -254,6 +263,8 @@ interaction: challenge, response, next item.
   viewing the same shared log may not. No transcoding, so that is a real limit.
 - Lists made on a device before signing in still exist locally and merge upward
   on the first sync — the sign-in wall is a gate on the UI, not a wipe.
+- Log entries have no restore and no bulk purge: deleted ones accumulate until
+  each is permanently deleted by hand. Fine at lab volume, revisit at thousands.
 - Magic-link email uses Supabase's shared SMTP on the free tier — a few per hour.
   Swap in real SMTP before this is used by anyone but us.
 
