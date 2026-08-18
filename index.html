@@ -138,7 +138,10 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
 .entry .meta { display: flex; gap: .75rem; font-size: .6875rem; letter-spacing: .1em;
                text-transform: uppercase; color: var(--dim); margin-bottom: .5rem; }
 .entry .meta .when { margin-left: auto; flex: none; }
+.entry .meta .badge { color: var(--over); }
 .entry p { margin: 0 0 .5rem; }
+.entry.gone :is(img, video) { opacity: .4; }
+.entry.gone > .meta span:first-child { text-decoration: line-through; }
 
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
@@ -312,6 +315,13 @@ function renderHome() {
       button('Edit', () => edit(l.id)),
       ...(sb ? [button('Log', () => showLog(l.id))] : []),
     ]));
+    ul.append(li);
+  }
+  // Deleting a checklist must not take its log with it — the run happened.
+  const buried = db.lists.filter(l => l.deleted && mine(l));
+  if (sb && buried.length) {
+    const li = make('li', { innerHTML: '<div class="meta"><span>Deleted checklists — logs kept</span></div>' });
+    li.append(make('div', { className: 'row acts' }, buried.map(l => button(l.title, () => showLog(l.id)))));
     ul.append(li);
   }
   $('acctBtn').textContent = !sb ? '' : user ? 'Sign out' : 'Sign in to sync';
@@ -522,25 +532,35 @@ async function showLog(id) {
     .eq('list_id', id).order('created_at', { ascending: false });
   if (error) return $('logBody').innerHTML = `<p class="note bad">${esc(error.message)}</p>`;
   if (!data.length) return $('logBody').innerHTML =
-    '<p class="note">Nothing logged yet. Start the checklist and tap Photo on a step.</p>';
+    '<p class="note">Nothing logged yet. Start the checklist and tap Photo/video on a step.</p>';
 
   const paths = data.map(e => e.path).filter(Boolean);
   const { data: signed } = paths.length ? await sb.storage.from('logs').createSignedUrls(paths, 3600) : { data: [] };
   const url = Object.fromEntries((signed || []).map(s => [s.path, s.signedUrl]));
   $('logBody').replaceChildren(...data.map(e => {
-    const card = make('div', { className: 'entry', innerHTML:
+    const gone = !!e.deleted_at;
+    const card = make('div', { className: gone ? 'entry gone' : 'entry', innerHTML:
       `<div class="meta"><span>${pad2(e.step + 1)} · ${esc(e.step_text)}</span>` +
+      (gone ? `<span class="badge">deleted ${esc(stamp(e.deleted_at))}</span>` : '') +
       `<span class="when">${esc(stamp(e.created_at))}</span></div>` +
       (url[e.path] ? isClip(e.path)
         ? `<video src="${url[e.path]}" controls playsinline preload="metadata"></video>`
         : `<img src="${url[e.path]}" alt="${esc(e.note || e.step_text)}" loading="lazy">` : '') +
       (e.note ? `<p>${esc(e.note)}</p>` : '') });
-    if (e.owner === user.id) card.append(button('Delete', () => removeEntry(e), 'btn quiet'));
+    if (e.owner === user.id) card.append(gone
+      ? button('Delete permanently', () => purgeEntry(e), 'btn quiet')
+      : button('Delete', () => removeEntry(e), 'btn quiet'));
     return card;
   }));
 }
+// Two stages on purpose: a log is a record, so "delete" only marks it. The entry
+// stays in the log, struck through and dated, until it is deliberately purged.
 async function removeEntry(e) {
-  if (!confirm('Delete this log entry?')) return;
+  await sb.from('log_entries').update({ deleted_at: new Date().toISOString() }).eq('id', e.id);
+  showLog(logList);
+}
+async function purgeEntry(e) {
+  if (!confirm('Delete this permanently? The picture and the entry are gone for good.')) return;
   if (e.path) await sb.storage.from('logs').remove([e.path]);
   await sb.from('log_entries').delete().eq('id', e.id);
   showLog(logList);
