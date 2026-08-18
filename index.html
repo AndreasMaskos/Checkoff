@@ -130,6 +130,14 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
                font: .75rem/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
 #tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--go); }
 
+/* --- photo log --- */
+#shotPreview, .entry img { display: block; width: 100%; border-radius: 5px; margin-bottom: .75rem; }
+.entry { border-bottom: 1px solid var(--line); padding: 1rem 0; }
+.entry .meta { display: flex; gap: .75rem; font-size: .6875rem; letter-spacing: .1em;
+               text-transform: uppercase; color: var(--dim); margin-bottom: .5rem; }
+.entry .meta .when { margin-left: auto; flex: none; }
+.entry p { margin: 0 0 .5rem; }
+
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
 </head>
@@ -186,11 +194,27 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
     <h1 id="challenge"></h1>
     <div id="clock" class="hidden"></div>
   </div>
+  <div class="panel hidden" id="shotPanel">
+    <h2 id="shotStep">Log this step</h2>
+    <img id="shotPreview" alt="Photo about to be logged">
+    <label>
+      <span class="eyebrow">Description — optional</span>
+      <input id="shotNote" placeholder="What this shows">
+    </label>
+    <div class="row">
+      <button class="btn go" onclick="saveShot()">Save to log</button>
+      <button class="btn" onclick="cancelShot()">Cancel</button>
+      <span class="spacer"></span>
+      <span class="note" id="shotMsg"></span>
+    </div>
+  </div>
   <div id="queue"></div>
   <div id="bar">
     <div class="row">
       <button class="btn go" onclick="mark(true)">Done</button>
       <button class="btn" onclick="mark(false)">Skip</button>
+      <button class="btn" onclick="$('shot').click()">Photo</button>
+      <input id="shot" class="hidden" type="file" accept="image/*">
       <button class="btn" onclick="move(-1)">Back</button>
       <button class="btn" onclick="undo()">Undo</button>
       <button class="btn quiet" onclick="quit()">Exit</button>
@@ -201,6 +225,14 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
       <span id="heard"></span>
     </div>
   </div>
+</section>
+
+<!-- ============ log ============ -->
+<section id="logView" class="hidden">
+  <p class="eyebrow" style="padding-top:1.25rem">Log</p>
+  <h1 id="logTitle" style="font:650 1.75rem/1.15 var(--sans);letter-spacing:-.03em;margin:.2rem 0 1.25rem"></h1>
+  <div id="logBody"></div>
+  <p style="margin-top:1.5rem"><button class="btn quiet" onclick="renderHome()">← Back to my checklists</button></p>
 </section>
 
 <!-- ============ auth ============ -->
@@ -276,6 +308,7 @@ function renderHome() {
     li.append(make('div', { className: 'row acts' }, [
       button('Start', () => start(l.id), 'btn go'),
       button('Edit', () => edit(l.id)),
+      ...(sb ? [button('Log', () => showLog(l.id))] : []),
     ]));
     ul.append(li);
   }
@@ -339,7 +372,7 @@ const pad2 = i => String(i).padStart(2, '0');
 function start(id) {
   const list = byId(id);
   const steps = list.items.map(parseStep);
-  run = { title: list.title, steps, at: 0, state: steps.map(() => null), times: steps.map(() => 0),
+  run = { id, title: list.title, steps, at: 0, state: steps.map(() => null), times: steps.map(() => 0),
           enteredAt: Date.now(), deadline: 0, rang: false, history: [] };
   $('listName').textContent = list.title;
   renderRun();
@@ -411,7 +444,91 @@ function move(d) {
   if (d) { snapshot(); leaveStep(); run.at = Math.max(0, Math.min(run.steps.length, run.at + d)); }
   enterStep();
 }
-function quit() { if (listening) toggleMic(); run = null; renderHome(); }
+function quit() { if (listening) toggleMic(); cancelShot(); run = null; renderHome(); }
+
+/* ================= photo log =================
+   A picture of what actually happened on a step, timestamped, kept per list.
+   ponytail: upload goes straight out — no offline queue. Add one if logging
+   from a basement without signal turns out to matter. */
+let pending = null;
+const fit = (w, h, max = 1600) => { const s = Math.min(1, max / Math.max(w, h)); return [Math.round(w * s), Math.round(h * s)]; };
+const stamp = iso => new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+
+async function shrink(file) {                 // phone photos are 4 MB; 1600px of JPEG is plenty for a log
+  const img = await createImageBitmap(file);
+  const [w, h] = fit(img.width, img.height);
+  const c = Object.assign(document.createElement('canvas'), { width: w, height: h });
+  c.getContext('2d').drawImage(img, 0, 0, w, h);
+  return new Promise(r => c.toBlob(r, 'image/jpeg', 0.8));
+}
+
+$('shot').onchange = async e => {
+  const file = e.target.files[0];
+  e.target.value = '';                        // so the same picture can be picked twice
+  if (!file || !run) return;
+  const over = run.at >= run.steps.length;
+  pending = { list: run.id, step: run.at, text: over ? 'Checklist complete' : run.steps[run.at].text,
+              blob: await shrink(file) };
+  $('shotStep').textContent = pending.text;
+  $('shotPreview').src = URL.createObjectURL(pending.blob);
+  $('shotNote').value = '';
+  note($('shotMsg'), user ? '' : 'Sign in to keep a photo log.', !user);
+  $('shotPanel').classList.remove('hidden');
+  $('shotNote').focus();
+};
+function cancelShot() {
+  if ($('shotPreview').src.startsWith('blob:')) URL.revokeObjectURL($('shotPreview').src);
+  $('shotPreview').removeAttribute('src');
+  $('shotPanel').classList.add('hidden');
+  pending = null;
+}
+async function saveShot() {
+  if (!pending) return;
+  if (!user) return note($('shotMsg'), 'Sign in to keep a photo log.', true);
+  note($('shotMsg'), 'Uploading…');
+  const path = `${pending.list}/${crypto.randomUUID()}.jpg`;
+  const up = await sb.storage.from('logs').upload(path, pending.blob, { contentType: 'image/jpeg' });
+  if (up.error) return note($('shotMsg'), up.error.message, true);
+  const { error } = await sb.from('log_entries').insert({
+    list_id: pending.list, owner: user.id, step: pending.step, step_text: pending.text,
+    note: $('shotNote').value.trim(), path,
+  });
+  if (error) return note($('shotMsg'), error.message, true);
+  cancelShot();
+}
+
+let logList = null;
+async function showLog(id) {
+  logList = id;
+  $('logTitle').textContent = byId(id).title;
+  $('logBody').innerHTML = '<p class="note">Loading…</p>';
+  show('logView');
+  if (!user) return $('logBody').innerHTML = '<p class="note">Sign in to see this checklist’s log.</p>';
+  const { data, error } = await sb.from('log_entries').select('*')
+    .eq('list_id', id).order('created_at', { ascending: false });
+  if (error) return $('logBody').innerHTML = `<p class="note bad">${esc(error.message)}</p>`;
+  if (!data.length) return $('logBody').innerHTML =
+    '<p class="note">Nothing logged yet. Start the checklist and tap Photo on a step.</p>';
+
+  const paths = data.map(e => e.path).filter(Boolean);
+  const { data: signed } = paths.length ? await sb.storage.from('logs').createSignedUrls(paths, 3600) : { data: [] };
+  const url = Object.fromEntries((signed || []).map(s => [s.path, s.signedUrl]));
+  $('logBody').replaceChildren(...data.map(e => {
+    const card = make('div', { className: 'entry', innerHTML:
+      `<div class="meta"><span>${pad2(e.step + 1)} · ${esc(e.step_text)}</span>` +
+      `<span class="when">${esc(stamp(e.created_at))}</span></div>` +
+      (url[e.path] ? `<img src="${url[e.path]}" alt="${esc(e.note || e.step_text)}" loading="lazy">` : '') +
+      (e.note ? `<p>${esc(e.note)}</p>` : '') });
+    if (e.owner === user.id) card.append(button('Delete', () => removeEntry(e), 'btn quiet'));
+    return card;
+  }));
+}
+async function removeEntry(e) {
+  if (!confirm('Delete this log entry?')) return;
+  if (e.path) await sb.storage.from('logs').remove([e.path]);
+  await sb.from('log_entries').delete().eq('id', e.id);
+  showLog(logList);
+}
 
 setInterval(tick, 1000);
 function tick() {
@@ -430,7 +547,7 @@ let rec = null, listening = false, speaking = false;
 // ponytail: substring match, no grammar/NLU. Add fuzzy matching only if misfires show up.
 const COMMANDS = [
   ['undo',   ['undo', 'rückgängig', 'ruckgangig', 'zurücknehmen']],
-  ['done',   ['done', 'check', 'yes', 'ok', 'okay', 'complete', 'erledigt', 'fertig', 'ja', 'passt']],
+  ['done',   ['done', 'check', 'chek', 'yes', 'ok', 'okay', 'complete', 'erledigt', 'fertig', 'ja', 'passt']],
   ['skip',   ['skip', 'no', 'überspringen', 'uberspringen', 'nein']],
   ['next',   ['next', 'weiter', 'nächste', 'nachste']],
   ['back',   ['back', 'previous', 'zurück', 'zuruck']],
@@ -514,7 +631,7 @@ async function push(lists) {
   saveLocal();
 }
 async function sync() {
-  if (!user) return renderHome();
+  if (!user) { renderHome(); return showAuth('up'); }   // signed out: start on Create account
   const { data, error } = await sb.from('lists').select('*');
   if (error) return;
   const { lists, outbox } = merge(db.lists, data, user.id);
@@ -659,7 +776,8 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY) {
 }
 
 /* ================= boot ================= */
-Object.assign(window, { edit, save, removeList, start, mark, move, undo, quit, toggleMic, renderHome, setMode, magicLink });
+Object.assign(window, { $, edit, save, removeList, start, mark, move, undo, quit, toggleMic, renderHome, setMode,
+                        magicLink, saveShot, cancelShot, showLog });
 if (!SR) $('support').textContent = 'Voice control needs Chrome, Edge or Safari — this browser has no Web Speech API.';
 setMode('in');
 renderHome();
@@ -671,12 +789,16 @@ if (invite) openShareLink(invite[1]);
 if (location.hash === '#test') {
   const eq = (a, b) => console.assert(JSON.stringify(a) === JSON.stringify(b), a, '!==', b);
   eq(matchCommand('Okay, done!'), 'done');
+  eq(matchCommand('chek'), 'done');
   eq(matchCommand('undo that'), 'undo');
   eq(matchCommand('abandoned'), null);                       // must not match "done" mid-word
   eq(parseStep('Grind beans @40s'), { text: 'Grind beans', secs: 40 });
   eq(parseStep('Stretch @1:30'), { text: 'Stretch', secs: 90 });
   eq(parseStep('Email @work'), { text: 'Email @work', secs: 0 });
   eq(esc('<img src=x onerror=alert(1)>'), '&lt;img src=x onerror=alert(1)&gt;');
+  eq(fit(4000, 3000), [1600, 1200]);                         // downscale keeps the aspect ratio
+  eq(fit(3000, 4000), [1200, 1600]);
+  eq(fit(800, 600), [800, 600]);                             // never upscale
   const row = (id, t, at, owner = 'me') => ({ id, owner, title: t, items: [], deleted: false,
     share_token: null, share_mode: 'copy', updated_at: new Date(at).toISOString() });
   eq(merge([], [row('a', 'A', 10)], 'me').lists.length, 1);                       // remote arrives
