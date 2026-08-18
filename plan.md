@@ -29,7 +29,7 @@ Last updated 2026-08-18.
 | 8 | Deployed to GitHub Pages | done |
 | 9 | Sign up / sign in screen — required, and the only screen when signed out | done |
 | 10 | Visual design pass | done |
-| 11 | Photo log — a picture + description per step, timestamped | done, live |
+| 11 | Photo log — picture or clip + description per step, timestamped | done, live |
 | — | Supabase Auth → URL Configuration redirect URLs | **verify in dashboard** |
 
 The last row is the one thing that can't be checked from code: magic links and
@@ -122,10 +122,11 @@ made are unaffected.
 
 ## Photo log
 
-Evidence of what actually happened, kept per step. On any step of a run, **Photo**
-opens the camera or library; the picture is downscaled in the browser to 1600 px
-JPEG, shown with an optional description, and saved. **Log** on the home row
-lists everything for that checklist, newest first.
+Evidence of what actually happened, kept per step. On any step of a run,
+**Photo/video** opens the camera or library; a picture is downscaled in the
+browser to 1600 px JPEG, a clip goes up as it was shot. Either is shown with an
+optional description before saving. **Log** on the home row lists everything for
+that checklist, newest first, images inline and clips as players.
 
 ```js
 log_entries: { id, list_id, owner, step, step_text, note, path, created_at }
@@ -133,7 +134,13 @@ log_entries: { id, list_id, owner, step, step_text, note, path, created_at }
 
 - `step_text` is a **snapshot**. Renaming a step later must not rewrite what the
   log says was done at the time.
-- Images live in the private `logs` bucket as `<list_id>/<uuid>.jpg`. Naming them
+- **Video is not transcoded**, only size-capped at 50 MB client-side (Supabase's
+  free-tier per-object limit). Transcoding in-browser means ffmpeg.wasm, which is
+  more code than the whole app. Record shorter clips instead.
+- The file **extension** is what tells a clip from a picture on the way back
+  down (`isClip`), rather than a mime column on the table — one regex, no
+  migration, and the extension is already in the path.
+- Files live in the private `logs` bucket as `<list_id>/<uuid><ext>`. Naming them
   by list is what lets access follow the list: the storage policy runs the same
   `owns_list` / `is_member` check the table does, so everyone on a live-shared
   list keeps **one** shared record instead of one private log each.
@@ -241,8 +248,10 @@ interaction: challenge, response, next item.
 - Wake lock keeps the screen on during a run; unsupported on iOS < 16.4.
 - No view-only sharing role, no member list, no way to see who joined.
 - No run history, streaks, or reminders/notifications.
-- Photo log needs a signal: no offline upload queue, no video, no way to log a
-  note without a picture.
+- Photo log needs a signal: no offline upload queue, and no way to log a note
+  without a picture or clip.
+- An iPhone records `.mov`/HEVC. Safari plays it back fine; a Windows Chrome
+  viewing the same shared log may not. No transcoding, so that is a real limit.
 - Lists made on a device before signing in still exist locally and merge upward
   on the first sync — the sign-in wall is a gate on the UI, not a wipe.
 - Magic-link email uses Supabase's shared SMTP on the free tier — a few per hour.

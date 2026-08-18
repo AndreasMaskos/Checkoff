@@ -131,7 +131,9 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
 #tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--go); }
 
 /* --- photo log --- */
-#shotPreview, .entry img { display: block; width: 100%; border-radius: 5px; margin-bottom: .75rem; }
+#shotPreview :is(img, video), .entry :is(img, video) {
+  display: block; width: 100%; border-radius: 5px; margin-bottom: .75rem; background: var(--bg);
+}
 .entry { border-bottom: 1px solid var(--line); padding: 1rem 0; }
 .entry .meta { display: flex; gap: .75rem; font-size: .6875rem; letter-spacing: .1em;
                text-transform: uppercase; color: var(--dim); margin-bottom: .5rem; }
@@ -196,7 +198,7 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
   </div>
   <div class="panel hidden" id="shotPanel">
     <h2 id="shotStep">Log this step</h2>
-    <img id="shotPreview" alt="Photo about to be logged">
+    <div id="shotPreview"></div>
     <label>
       <span class="eyebrow">Description — optional</span>
       <input id="shotNote" placeholder="What this shows">
@@ -213,8 +215,8 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
     <div class="row">
       <button class="btn go" onclick="mark(true)">Done</button>
       <button class="btn" onclick="mark(false)">Skip</button>
-      <button class="btn" onclick="$('shot').click()">Photo</button>
-      <input id="shot" class="hidden" type="file" accept="image/*">
+      <button class="btn" onclick="$('shot').click()">Photo/video</button>
+      <input id="shot" class="hidden" type="file" accept="image/*,video/*">
       <button class="btn" onclick="move(-1)">Back</button>
       <button class="btn" onclick="undo()">Undo</button>
       <button class="btn quiet" onclick="quit()">Exit</button>
@@ -447,12 +449,17 @@ function move(d) {
 function quit() { if (listening) toggleMic(); cancelShot(); run = null; renderHome(); }
 
 /* ================= photo log =================
-   A picture of what actually happened on a step, timestamped, kept per list.
-   ponytail: upload goes straight out — no offline queue. Add one if logging
-   from a basement without signal turns out to matter. */
+   A picture or clip of what actually happened on a step, timestamped, kept per
+   list. ponytail: upload goes straight out — no offline queue. Add one if
+   logging from a basement without signal turns out to matter. */
 let pending = null;
+const MAX = 50 * 1024 * 1024;                 // our own cap, matching Supabase's free-tier per-object limit
 const fit = (w, h, max = 1600) => { const s = Math.min(1, max / Math.max(w, h)); return [Math.round(w * s), Math.round(h * s)]; };
 const stamp = iso => new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+// Videos are told apart by the file extension on the way back down — cheaper than a mime column.
+const extOf = (name, type) => (name.match(/\.[a-z0-9]+$/i)?.[0] || '.' + ((type || '').split('/')[1] || 'bin')).toLowerCase();
+const isClip = path => /\.(mp4|mov|m4v|webm|avi|3gp)$/i.test(path || '');
+const oversize = b => `That file is ${Math.round(b.size / 1e6)} MB. Keep it under 50 MB — record a shorter clip.`;
 
 async function shrink(file) {                 // phone photos are 4 MB; 1600px of JPEG is plenty for a log
   const img = await createImageBitmap(file);
@@ -464,30 +471,37 @@ async function shrink(file) {                 // phone photos are 4 MB; 1600px o
 
 $('shot').onchange = async e => {
   const file = e.target.files[0];
-  e.target.value = '';                        // so the same picture can be picked twice
+  e.target.value = '';                        // so the same file can be picked twice
   if (!file || !run) return;
+  const clip = (file.type || '').startsWith('video/');
+  const blob = clip ? file : await shrink(file);   // ponytail: no transcoding, a clip goes up as it was shot
   const over = run.at >= run.steps.length;
   pending = { list: run.id, step: run.at, text: over ? 'Checklist complete' : run.steps[run.at].text,
-              blob: await shrink(file) };
+              blob, url: URL.createObjectURL(blob),
+              ext: clip ? extOf(file.name, file.type) : '.jpg',
+              type: clip ? file.type || 'video/mp4' : 'image/jpeg' };
   $('shotStep').textContent = pending.text;
-  $('shotPreview').src = URL.createObjectURL(pending.blob);
+  $('shotPreview').replaceChildren(clip
+    ? make('video', { src: pending.url, controls: true, playsInline: true, preload: 'metadata' })
+    : make('img', { src: pending.url, alt: 'About to be logged' }));
   $('shotNote').value = '';
-  note($('shotMsg'), user ? '' : 'Sign in to keep a photo log.', !user);
+  note($('shotMsg'), blob.size > MAX ? oversize(blob) : '', blob.size > MAX);
   $('shotPanel').classList.remove('hidden');
   $('shotNote').focus();
 };
 function cancelShot() {
-  if ($('shotPreview').src.startsWith('blob:')) URL.revokeObjectURL($('shotPreview').src);
-  $('shotPreview').removeAttribute('src');
+  if (pending?.url) URL.revokeObjectURL(pending.url);
+  $('shotPreview').replaceChildren();
   $('shotPanel').classList.add('hidden');
   pending = null;
 }
 async function saveShot() {
   if (!pending) return;
-  if (!user) return note($('shotMsg'), 'Sign in to keep a photo log.', true);
+  if (!user) return note($('shotMsg'), 'Sign in to keep a log.', true);
+  if (pending.blob.size > MAX) return note($('shotMsg'), oversize(pending.blob), true);
   note($('shotMsg'), 'Uploading…');
-  const path = `${pending.list}/${crypto.randomUUID()}.jpg`;
-  const up = await sb.storage.from('logs').upload(path, pending.blob, { contentType: 'image/jpeg' });
+  const path = `${pending.list}/${crypto.randomUUID()}${pending.ext}`;
+  const up = await sb.storage.from('logs').upload(path, pending.blob, { contentType: pending.type });
   if (up.error) return note($('shotMsg'), up.error.message, true);
   const { error } = await sb.from('log_entries').insert({
     list_id: pending.list, owner: user.id, step: pending.step, step_text: pending.text,
@@ -517,7 +531,9 @@ async function showLog(id) {
     const card = make('div', { className: 'entry', innerHTML:
       `<div class="meta"><span>${pad2(e.step + 1)} · ${esc(e.step_text)}</span>` +
       `<span class="when">${esc(stamp(e.created_at))}</span></div>` +
-      (url[e.path] ? `<img src="${url[e.path]}" alt="${esc(e.note || e.step_text)}" loading="lazy">` : '') +
+      (url[e.path] ? isClip(e.path)
+        ? `<video src="${url[e.path]}" controls playsinline preload="metadata"></video>`
+        : `<img src="${url[e.path]}" alt="${esc(e.note || e.step_text)}" loading="lazy">` : '') +
       (e.note ? `<p>${esc(e.note)}</p>` : '') });
     if (e.owner === user.id) card.append(button('Delete', () => removeEntry(e), 'btn quiet'));
     return card;
@@ -801,6 +817,9 @@ if (location.hash === '#test') {
   eq(fit(4000, 3000), [1600, 1200]);                         // downscale keeps the aspect ratio
   eq(fit(3000, 4000), [1200, 1600]);
   eq(fit(800, 600), [800, 600]);                             // never upscale
+  eq(extOf('IMG_0042.MOV', 'video/quicktime'), '.mov');       // extension wins, lowercased
+  eq(extOf('clip', 'video/mp4'), '.mp4');                     // no extension: fall back to the mime type
+  eq([isClip('x/y.mov'), isClip('x/y.jpg')], [true, false]);  // and it round-trips on the way back down
   const row = (id, t, at, owner = 'me') => ({ id, owner, title: t, items: [], deleted: false,
     share_token: null, share_mode: 'copy', updated_at: new Date(at).toISOString() });
   eq(merge([], [row('a', 'A', 10)], 'me').lists.length, 1);                       // remote arrives
