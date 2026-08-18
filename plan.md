@@ -27,7 +27,7 @@ Last updated 2026-08-18.
 | 6 | Accounts + sync | done, live |
 | 7 | Sharing — copy link and live link | done, live |
 | 8 | Deployed to GitHub Pages | done |
-| 9 | Sign up / sign in screen — also the start page when signed out | done |
+| 9 | Sign up / sign in screen — required, and the only screen when signed out | done |
 | 10 | Visual design pass | done |
 | 11 | Photo log — a picture + description per step, timestamped | done, live |
 | — | Supabase Auth → URL Configuration redirect URLs | **verify in dashboard** |
@@ -140,18 +140,24 @@ log_entries: { id, list_id, owner, step, step_text, note, path, created_at }
 - Reads go through 1-hour signed URLs, so an image link can't be forwarded to
   someone outside the list forever.
 - Uploads are direct, with no offline queue — the one part of the app that needs
-  a signal. Photos taken with no account or no network are not kept.
+  a signal. Photos taken with no network are not kept. An account is guaranteed
+  by then: the runner is unreachable signed out.
 
 ## Accounts
 
 Email + password sign up and sign in on a dedicated screen, magic link as the
-alternative. Signed-out visitors **start** on that screen rather than on an empty
-home: `sync()` runs on Supabase's `INITIAL_SESSION` event, so the no-user branch
-there is the single place that decides it — and it covers signing out too.
+alternative. An account is **required**: signed out, the sign-in screen is the
+only screen, with no way past it.
 
-An account is **optional** — "← Back to my checklists" leaves the screen and the
-app is fully usable and purely local, minus sync, sharing and the photo log.
-Signing in later merges the device into the account rather than replacing it.
+The gate is one line in `show()`, the funnel every section change already goes
+through — `if (sb && !user && id !== 'auth') id = 'auth'` — rather than a check
+in each caller, so a new screen cannot forget it. Boot awaits `getSession()`
+before the first render, otherwise every signed-in load flashes the sign-in
+screen while the session restores.
+
+`sb && ` is the deliberate exception: with no credentials in `config.js` there is
+nothing to sign in to, and the app stays a purely local checklist. That is the
+only way to run it without an account.
 
 ## Voice
 
@@ -235,8 +241,10 @@ interaction: challenge, response, next item.
 - Wake lock keeps the screen on during a run; unsupported on iOS < 16.4.
 - No view-only sharing role, no member list, no way to see who joined.
 - No run history, streaks, or reminders/notifications.
-- Photo log needs an account and a signal: no offline upload queue, no video, no
-  way to log a note without a picture.
+- Photo log needs a signal: no offline upload queue, no video, no way to log a
+  note without a picture.
+- Lists made on a device before signing in still exist locally and merge upward
+  on the first sync — the sign-in wall is a gate on the UI, not a wipe.
 - Magic-link email uses Supabase's shared SMTP on the free tier — a few per hour.
   Swap in real SMTP before this is used by anyone but us.
 
