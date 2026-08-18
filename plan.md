@@ -4,7 +4,7 @@ Hands-free checklists for daily repetitive tasks. The app speaks a step, you say
 "done", it checks it off and speaks the next one — so the routine runs the same
 way every time without touching the phone.
 
-Last updated 2026-08-12.
+Last updated 2026-08-18.
 
 ## Where everything is
 
@@ -27,8 +27,9 @@ Last updated 2026-08-12.
 | 6 | Accounts + sync | done, live |
 | 7 | Sharing — copy link and live link | done, live |
 | 8 | Deployed to GitHub Pages | done |
-| 9 | Sign up / sign in screen | done |
+| 9 | Sign up / sign in screen — also the start page when signed out | done |
 | 10 | Visual design pass | done |
+| 11 | Photo log — a picture + description per step, timestamped | done, live |
 | — | Supabase Auth → URL Configuration redirect URLs | **verify in dashboard** |
 
 The last row is the one thing that can't be checked from code: magic links and
@@ -40,7 +41,7 @@ signup confirmations bounce to Supabase's default `localhost:3000` unless
 
 | File | Purpose |
 |------|---------|
-| `index.html` | The entire app — markup, design, voice, timers, undo, sync, sharing, auth |
+| `index.html` | The entire app — markup, design, voice, timers, undo, sync, sharing, auth, photo log |
 | `config.js` | Supabase URL + publishable key. Empty = sync off, everything else still works |
 | `manifest.json` | PWA metadata (installable, standalone, portrait) |
 | `sw.js` | Service worker, stale-while-revalidate app shell cache |
@@ -61,8 +62,9 @@ python3 -m http.server 8000     # then http://localhost:8000
 ```
 
 **Tests:** open `index.html#test` and read the console. Asserts cover the voice
-command matcher, the `@duration` parser, HTML escaping, and the sync merge in
-both directions. No framework, no runner — if something goes red it prints.
+command matcher, the `@duration` parser, HTML escaping, the photo downscale
+maths, and the sync merge in both directions. No framework, no runner — if
+something goes red it prints.
 
 ## Data model
 
@@ -85,8 +87,9 @@ Run state — which steps are checked, elapsed times, the undo stack — is
 deliberately **not** in here. It lives in memory for the duration of a run and
 never syncs, so two people running the same shared list never collide.
 
-**On the server:** `lists` (one row per checklist) and `shares` (one row per
-member of a live list), both under RLS. Full definitions live in the migrations;
+**On the server:** `lists` (one row per checklist), `shares` (one row per member
+of a live list) and `log_entries` (one row per logged picture), all under RLS,
+plus the private `logs` storage bucket. Full definitions live in the migrations;
 don't hand-edit tables in the dashboard or the repo stops describing reality.
 
 ## Sync
@@ -117,12 +120,38 @@ Everyone on a live list is an equal editor — no view-only role until someone a
 for one. "Stop sharing" clears the token and removes every member; copies already
 made are unaffected.
 
+## Photo log
+
+Evidence of what actually happened, kept per step. On any step of a run, **Photo**
+opens the camera or library; the picture is downscaled in the browser to 1600 px
+JPEG, shown with an optional description, and saved. **Log** on the home row
+lists everything for that checklist, newest first.
+
+```js
+log_entries: { id, list_id, owner, step, step_text, note, path, created_at }
+```
+
+- `step_text` is a **snapshot**. Renaming a step later must not rewrite what the
+  log says was done at the time.
+- Images live in the private `logs` bucket as `<list_id>/<uuid>.jpg`. Naming them
+  by list is what lets access follow the list: the storage policy runs the same
+  `owns_list` / `is_member` check the table does, so everyone on a live-shared
+  list keeps **one** shared record instead of one private log each.
+- Reads go through 1-hour signed URLs, so an image link can't be forwarded to
+  someone outside the list forever.
+- Uploads are direct, with no offline queue — the one part of the app that needs
+  a signal. Photos taken with no account or no network are not kept.
+
 ## Accounts
 
 Email + password sign up and sign in on a dedicated screen, magic link as the
-alternative. An account is **optional** — with none, the app is fully usable and
-purely local; signing in later merges the device into the account rather than
-replacing it.
+alternative. Signed-out visitors **start** on that screen rather than on an empty
+home: `sync()` runs on Supabase's `INITIAL_SESSION` event, so the no-user branch
+there is the single place that decides it — and it covers signing out too.
+
+An account is **optional** — "← Back to my checklists" leaves the screen and the
+app is fully usable and purely local, minus sync, sharing and the photo log.
+Signing in later merges the device into the account rather than replacing it.
 
 ## Voice
 
@@ -131,7 +160,7 @@ the recognizer's language follows the browser locale.
 
 | Command | Words |
 |---------|-------|
-| check it off | done, check, yes, ok, complete, erledigt, fertig, ja, passt |
+| check it off | done, check, chek, yes, ok, complete, erledigt, fertig, ja, passt |
 | skip | skip, no, überspringen, nein |
 | next / back | next, weiter · back, previous, zurück |
 | repeat | repeat, again, nochmal, wiederhol |
@@ -141,6 +170,9 @@ the recognizer's language follows the browser locale.
 Two mechanics that matter: the mic is muted while the app speaks (otherwise it
 hears itself and checks off the step it just read), and recognition is restarted
 on every `onend` because browsers end it after each phrase of silence.
+
+Matching is substring-on-word-start, so mis-hearings are cheap to absorb: `chek`
+is in the list purely because the recognizer produces it.
 
 ## Timers and undo
 
@@ -188,6 +220,10 @@ interaction: challenge, response, next item.
 - **Migrations deploy on push to main** via the Supabase GitHub integration.
   Verified working. Always confirm against the live API afterwards
   (`curl $URL/rest/v1/lists?select=id -H "apikey: …"`) rather than trusting it.
+- **Storage objects are named by list, not by user** (`<list_id>/<uuid>.jpg`).
+  Naming them by uploader would have split a shared checklist's log into private
+  piles and made the policy disagree with the table's.
+- **`SampleLists/` is gitignored.** The repo is public; those are lab screenshots.
 - Icons were generated on macOS with `qlmanage -t -s 512` then `sips -z 192 192`
   — no design tool needed to regenerate them from `icon.svg`.
 
@@ -199,6 +235,8 @@ interaction: challenge, response, next item.
 - Wake lock keeps the screen on during a run; unsupported on iOS < 16.4.
 - No view-only sharing role, no member list, no way to see who joined.
 - No run history, streaks, or reminders/notifications.
+- Photo log needs an account and a signal: no offline upload queue, no video, no
+  way to log a note without a picture.
 - Magic-link email uses Supabase's shared SMTP on the free tier — a few per hour.
   Swap in real SMTP before this is used by anyone but us.
 
@@ -207,9 +245,11 @@ interaction: challenge, response, next item.
 Nothing here is committed to; listed so the reasoning isn't re-derived later.
 
 1. Run history — every completed run with its per-step times; the data is already
-   collected, only the storage is missing.
+   collected, and `log_entries` is now the obvious table to hang it off.
 2. Realtime propagation for live lists (`postgres_changes`, ~5 lines) so a shared
    list updates without a focus/sync.
 3. Reorder steps by drag, if editing raw lines in the textarea starts to chafe.
 4. A "wake word" so the mic can stay off until called, instead of listening for
    the whole run.
+5. Offline queue for photo uploads (IndexedDB + flush on focus), if logging in a
+   basement without signal turns out to be real rather than hypothetical.
