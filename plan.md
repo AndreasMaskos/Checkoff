@@ -33,6 +33,7 @@ Last updated 2026-08-18.
 | 12 | Log keeps deleted entries until permanently deleted | done, live |
 | 13 | Log search, date range and sort order, per checklist and across every log | done, live |
 | 14 | Purge of a deleted checklist and its log | done, live |
+| 15 | Export of the filtered log as standalone HTML | done, live |
 | — | Supabase Auth → URL Configuration redirect URLs | **verify in dashboard** |
 
 The last row is the one thing that can't be checked from code: magic links and
@@ -159,6 +160,13 @@ inclusive, either end optional), all client-side over the rows already fetched.
 Dates compare on the reader's local day, so a picture taken at 23:30 belongs to
 that evening rather than to the next UTC one. Deleting patches those rows in
 place instead of refetching, so the filters survive it.
+
+**Export** writes exactly what is on screen — same filters, same order — as one
+self-contained HTML file: pictures inlined as data URIs, so it opens anywhere,
+prints to PDF and survives in a lab notebook. Signed URLs would be dead in an
+hour, which is why nothing is linked. Clips are listed by name, not embedded: a
+50 MB video base64s to 67 MB. The filter and sort live in `shownEntries()`, so
+the export and the view cannot disagree about what "the filtered logs" means.
 
 **Order** is the reader's choice: newest first (the default), oldest first, by
 step — which groups every run's picture of the same step together — or by
@@ -294,6 +302,8 @@ interaction: challenge, response, next item.
 - Log entries have no restore and no bulk purge: deleted ones accumulate until
   each is permanently deleted by hand. Fine at lab volume, revisit at thousands.
 - Search matches plain substrings — no fuzzy matching.
+- Export is HTML only: no CSV, no zip of the original files, and videos are named
+  rather than included. Exporting many photos builds the whole file in memory.
 - Purging a checklist from one device can be undone by another that still holds
   the tombstone: its next sync re-pushes an empty shell. The log stays gone.
 - Magic-link email uses Supabase's shared SMTP on the free tier — a few per hour.
