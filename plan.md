@@ -33,7 +33,8 @@ Last updated 2026-08-18.
 | 12 | Log keeps deleted entries until permanently deleted | done, live |
 | 13 | Log search, date range and sort order, per checklist and across every log | done, live |
 | 14 | Purge of a deleted checklist and its log | done, live |
-| 15 | Export of the filtered log as standalone HTML | done, live |
+| 15 | Export of the filtered log — standalone HTML or CSV | done, live |
+| 16 | Offline upload queue, run ids, notes without a picture | done, live |
 | — | Supabase Auth → URL Configuration redirect URLs | **verify in dashboard** |
 
 The last row is the one thing that can't be checked from code: magic links and
@@ -198,9 +199,17 @@ filter moves into PostgREST (`or(note.ilike…)`) when they run to thousands.
   list keeps **one** shared record instead of one private log each.
 - Reads go through 1-hour signed URLs, so an image link can't be forwarded to
   someone outside the list forever.
-- Uploads are direct, with no offline queue — the one part of the app that needs
-  a signal. Photos taken with no network are not kept. An account is guaranteed
-  by then: the runner is unreachable signed out.
+- **Nothing uploads directly.** Every capture is written to IndexedDB first and
+  uploaded second, flushed on save, on window focus, on the `online` event and at
+  boot. A picture you cannot retake must not depend on the network being up at
+  that second. `created_at` carries when it happened, not when it arrived.
+- The queue id **becomes the row id**, so a retry after a half-finished upload
+  collides on the primary key (23505, treated as success) instead of logging the
+  same thing twice.
+- **`run_id`** ties every entry from one run together — two surgeries on the same
+  day used to interleave with nothing to tell them apart. Shown as a four-character
+  tag in the log, exported in full.
+- **A note needs no picture.** "Bleeding at 12:04" is a log entry; `path` stays null.
 
 ## Accounts
 
@@ -214,9 +223,13 @@ in each caller, so a new screen cannot forget it. Boot awaits `getSession()`
 before the first render, otherwise every signed-in load flashes the sign-in
 screen while the session restores.
 
-`sb && ` is the deliberate exception: with no credentials in `config.js` there is
-nothing to sign in to, and the app stays a purely local checklist. That is the
-only way to run it without an account.
+Two deliberate exceptions. `sb && ` — with no credentials in `config.js` there is
+nothing to sign in to, and the app stays a purely local checklist. And
+`offlineOK()`: an access token lasts an hour and cannot be refreshed with no
+signal, so a device that has signed in before (`localStorage.lastUser`) gets in
+while `navigator.onLine` is false. Without that, the wall would lock you out in
+exactly the basement the upload queue exists to survive. Sync and the logs stay
+unavailable there; capturing does not, because the queue holds it.
 
 ## Voice
 
@@ -300,8 +313,10 @@ interaction: challenge, response, next item.
 - Wake lock keeps the screen on during a run; unsupported on iOS < 16.4.
 - No view-only sharing role, no member list, no way to see who joined.
 - No run history, streaks, or reminders/notifications.
-- Photo log needs a signal: no offline upload queue, and no way to log a note
-  without a picture or clip.
+- The queue retries in order and stops at the first failure, so one wedged item
+  blocks the rest. No per-item error surfacing beyond the "n waiting" count.
+- Queued captures are on **that device only** until they upload — a second phone
+  cannot see them, and clearing site data drops them.
 - An iPhone records `.mov`/HEVC. Safari plays it back fine; a Windows Chrome
   viewing the same shared log may not. No transcoding, so that is a real limit.
 - Lists made on a device before signing in still exist locally and merge upward
@@ -327,5 +342,5 @@ Nothing here is committed to; listed so the reasoning isn't re-derived later.
 3. Reorder steps by drag, if editing raw lines in the textarea starts to chafe.
 4. A "wake word" so the mic can stay off until called, instead of listening for
    the whole run.
-5. Offline queue for photo uploads (IndexedDB + flush on focus), if logging in a
-   basement without signal turns out to be real rather than hypothetical.
+5. Run history proper — the per-step times and skips a run already collects,
+   written once at the finish and keyed by the `run_id` the log entries carry.

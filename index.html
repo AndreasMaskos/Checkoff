@@ -324,8 +324,12 @@ const mine = l => !l.owner || l.owner === user?.id;
 
 function touch(list) { list.updatedAt = Date.now(); saveLocal(); push([list]); }
 let screen = 'home';
+// An expired token cannot be refreshed with no signal, which would lock the app
+// behind the sign-in wall exactly where the queue is meant to save you. Someone
+// who has signed in on this device before gets in; the queue holds their work.
+const offlineOK = () => !navigator.onLine && localStorage.lastUser;
 function show(id) {
-  if (sb && !user && id !== 'auth') id = 'auth';   // signing in is not optional once sync is configured
+  if (sb && !user && !offlineOK() && id !== 'auth') id = 'auth';   // otherwise signing in is not optional
   for (const s of document.querySelectorAll('section')) s.classList.toggle('hidden', s.id !== id);
   screen = id;
   scrollTo(0, 0);
@@ -362,11 +366,11 @@ function renderHome() {
     li.append(make('div', { className: 'row acts' }, buried.map(l => button(l.title, () => showLog(l.id)))));
     ul.append(li);
   }
-  $('allLogsBtn').classList.toggle('hidden', !sb);
+  $('allLogsBtn').classList.toggle('hidden', !sb || !user);
   $('acctBtn').textContent = !sb ? '' : user ? 'Sign out' : 'Sign in to sync';
   $('acctBtn').classList.toggle('hidden', !sb);
   $('acctBtn').onclick = () => user ? sb.auth.signOut() : showAuth('in');
-  $('who').textContent = user ? user.email : '';
+  $('who').textContent = user ? user.email : offlineOK() ? 'offline' : '';
   show('home');
 }
 
@@ -912,7 +916,7 @@ async function push(lists) {
   saveLocal();
 }
 async function sync() {
-  if (!user) { renderHome(); return showAuth('up'); }   // signed out: start on Create account
+  if (!user) { renderHome(); return offlineOK() || showAuth('up'); }   // signed out: start on Create account
   const { data, error } = await sb.from('lists').select('*');
   if (error) return;
   const { lists, outbox } = merge(db.lists, data, user.id);
@@ -1049,6 +1053,7 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY) {
   sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   sb.auth.onAuthStateChange(async (_e, session) => {
     user = session?.user ?? null;
+    if (user) localStorage.lastUser = user.id;      // proof this device has an account, for offlineOK()
     if (user && localStorage.pendingInvite) {
       await sb.rpc('accept_invite', { token: localStorage.pendingInvite });
       delete localStorage.pendingInvite;
