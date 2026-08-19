@@ -168,6 +168,13 @@ hour, which is why nothing is linked. Clips are listed by name, not embedded: a
 50 MB video base64s to 67 MB. The filter and sort live in `shownEntries()`, so
 the export and the view cannot disagree about what "the filtered logs" means.
 
+**Export CSV** is the same rows as a spreadsheet — when (local *and* ISO),
+checklist, step number, step, description, photo/video, file name, deleted. Every
+field is quoted so a description with a comma, a quote or a newline round-trips,
+and the file starts with a BOM, which is what makes Excel read it as UTF-8
+instead of mangling umlauts. Separator is a comma; German Excel may want the
+import dialog for that.
+
 **Order** is the reader's choice: newest first (the default), oldest first, by
 step — which groups every run's picture of the same step together — or by
 checklist. It sticks while you move between logs; only Clear resets it.
@@ -302,7 +309,7 @@ interaction: challenge, response, next item.
 - Log entries have no restore and no bulk purge: deleted ones accumulate until
   each is permanently deleted by hand. Fine at lab volume, revisit at thousands.
 - Search matches plain substrings — no fuzzy matching.
-- Export is HTML only: no CSV, no zip of the original files, and videos are named
+- Export is HTML or CSV: no zip of the original files, and videos are named
   rather than included. Exporting many photos builds the whole file in memory.
 - Purging a checklist from one device can be undone by another that still holds
   the tombstone: its next sync re-pushes an empty shell. The log stays gone.
