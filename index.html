@@ -309,6 +309,10 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
   <div class="panel">
     <h2>Password</h2>
     <label>
+      <span class="eyebrow">Current password</span>
+      <input id="oldPass" type="password" autocomplete="current-password" placeholder="The one you use now">
+    </label>
+    <label>
       <span class="eyebrow">New password</span>
       <input id="newPass" type="password" autocomplete="new-password" minlength="6" placeholder="At least 6 characters">
     </label>
@@ -1212,7 +1216,7 @@ function setMode(mode) {
 function showAccount() {
   $('acctWho').textContent = user?.email ?? '';
   $('newEmail').value = '';
-  $('newPass').value = '';
+  $('oldPass').value = $('newPass').value = '';
   note($('emailMsg'), '');
   note($('passMsg'), '');
   show('account');
@@ -1224,13 +1228,22 @@ async function changeEmail() {
   const { error } = await sb.auth.updateUser({ email }, { emailRedirectTo: location.href.split('#')[0] });
   note($('emailMsg'), error ? error.message : 'Check the new inbox for the confirmation link.', !!error);
 }
+// Supabase will change the password of any live session without asking what the
+// old one was — an unlocked phone on a bench would be enough. Proving the current
+// password by signing in with it is the check it does not do for us. A failed
+// attempt returns an error and leaves the existing session alone.
 async function changePassword() {
-  const password = $('newPass').value;
-  if (password.length < 6) return note($('passMsg'), 'At least 6 characters.', true);
+  const current = $('oldPass').value, password = $('newPass').value;
+  if (!current) return note($('passMsg'), 'Enter your current password first.', true);
+  if (password.length < 6) return note($('passMsg'), 'The new password needs at least 6 characters.', true);
+  if (password === current) return note($('passMsg'), 'That is the password you already have.', true);
   note($('passMsg'), 'Working…');
+  const { error: wrong } = await sb.auth.signInWithPassword({ email: user.email, password: current });
+  if (wrong) return note($('passMsg'), 'That is not your current password.', true);
   const { error } = await sb.auth.updateUser({ password });
-  $('newPass').value = error ? password : '';
-  note($('passMsg'), error ? error.message : 'Password changed.', !!error);
+  if (error) return note($('passMsg'), error.message, true);
+  $('oldPass').value = $('newPass').value = '';
+  note($('passMsg'), 'Password changed.');
 }
 
 function note(target, text, bad = false) {

@@ -243,7 +243,13 @@ newest first, with the per-step times and what got skipped.
 Email + password sign up and sign in on a dedicated screen, magic link as the
 alternative. Once in, **Account** on home changes the email address (confirmed by
 a link to the new inbox; the old one keeps working until then), changes the
-password, and signs out. An account is **required**: signed out, the sign-in screen is the
+password, and signs out.
+
+**A password change requires the current password.** Supabase's `updateUser`
+will change the password of any live session without asking for the old one — an
+unlocked phone left on a bench would be enough. The current password is proved by
+signing in with it first; a wrong attempt returns `invalid_credentials` and
+leaves the existing session untouched (checked against the live API, not assumed). An account is **required**: signed out, the sign-in screen is the
 only screen, with no way past it.
 
 The gate is one line in `show()`, the funnel every section change already goes
