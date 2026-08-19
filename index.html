@@ -146,6 +146,7 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
                text-transform: uppercase; color: var(--dim); margin-bottom: .5rem; }
 .entry .meta .when { margin-left: auto; flex: none; }
 .entry .meta .badge { color: var(--over); }
+.entry .meta .which { color: var(--fg); font-weight: 600; }
 .entry p { margin: 0 0 .5rem; }
 .entry.gone :is(img, video) { opacity: .4; }
 .entry.gone > .meta span:first-child { text-decoration: line-through; }
@@ -166,6 +167,7 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
   <ul id="index"></ul>
   <div class="row" style="margin-top:1.25rem">
     <button class="btn go" onclick="edit(null)">New checklist</button>
+    <button class="btn" id="allLogsBtn" onclick="showLog(null)">Search all logs</button>
     <span class="spacer"></span>
     <button class="btn quiet" id="acctBtn"></button>
   </div>
@@ -341,6 +343,7 @@ function renderHome() {
     li.append(make('div', { className: 'row acts' }, buried.map(l => button(l.title, () => showLog(l.id)))));
     ul.append(li);
   }
+  $('allLogsBtn').classList.toggle('hidden', !sb);
   $('acctBtn').textContent = !sb ? '' : user ? 'Sign out' : 'Sign in to sync';
   $('acctBtn').classList.toggle('hidden', !sb);
   $('acctBtn').onclick = () => user ? sb.auth.signOut() : showAuth('in');
@@ -547,18 +550,24 @@ $('logBody').onclick = e => {
 };
 $('logSearch').oninput = () => renderEntries();
 
+const listTitle = e => byId(e.list_id)?.title ?? 'Unknown checklist';
+
+// id === null searches every log at once. ponytail: one fetch of all rows and one
+// signing call, filtered in the browser — rows are tiny. Move the filter into
+// PostgREST (`or(note.ilike…)`) when the log runs to thousands.
 async function showLog(id) {
-  const l = byId(id);
+  const l = id === null ? null : byId(id);
   logList = id; logRows = []; logUrls = {};
-  $('logTitle').textContent = l.title;
+  $('logTitle').textContent = l ? l.title : 'All logs';
   $('logSearch').value = '';
-  $('logPurge').classList.toggle('hidden', !(l.deleted && mine(l)));
+  $('logPurge').classList.toggle('hidden', !(l?.deleted && mine(l)));
   $('logPurge').onclick = () => purgeList(id);
   $('logBody').innerHTML = '<p class="note">Loading…</p>';
   show('logView');
   if (!user) return $('logBody').innerHTML = '<p class="note">Sign in to see this checklist’s log.</p>';
-  const { data, error } = await sb.from('log_entries').select('*')
-    .eq('list_id', id).order('created_at', { ascending: false });
+  let q = sb.from('log_entries').select('*').order('created_at', { ascending: false });
+  if (l) q = q.eq('list_id', id);
+  const { data, error } = await q;
   if (error) return $('logBody').innerHTML = `<p class="note bad">${esc(error.message)}</p>`;
   logRows = data;
   const paths = data.map(e => e.path).filter(Boolean);
@@ -568,16 +577,19 @@ async function showLog(id) {
 }
 function renderEntries() {
   const q = $('logSearch').value.trim().toLowerCase();
-  const rows = logRows.filter(e => !q || `${e.note} ${e.step_text}`.toLowerCase().includes(q));
+  const rows = logRows.filter(e => !q || `${e.note} ${e.step_text} ${listTitle(e)}`.toLowerCase().includes(q));
   if (!rows.length) return $('logBody').innerHTML = logRows.length
-    ? '<p class="note">No description or step matches that.</p>'
-    : '<p class="note">Nothing logged yet. Start the checklist and tap Photo/video on a step.</p>';
+    ? '<p class="note">No description, step or checklist matches that.</p>'
+    : `<p class="note">${logList === null ? 'No logs yet.' : 'Nothing logged yet.'} ` +
+      'Start a checklist and tap Photo/video on a step.</p>';
   $('logBody').replaceChildren(...rows.map(entryCard));
 }
 function entryCard(e) {
   const gone = !!e.deleted_at, url = logUrls[e.path];
   const card = make('div', { className: gone ? 'entry gone' : 'entry', innerHTML:
-    `<div class="meta"><span>${pad2(e.step + 1)} · ${esc(e.step_text)}</span>` +
+    '<div class="meta">' +
+    (logList === null ? `<span class="which">${esc(listTitle(e))}</span>` : '') +
+    `<span>${pad2(e.step + 1)} · ${esc(e.step_text)}</span>` +
     (gone ? `<span class="badge">deleted ${esc(stamp(e.deleted_at))}</span>` : '') +
     `<span class="when">${esc(stamp(e.created_at))}</span></div>` +
     (url ? '<div class="media">' + (isClip(e.path)

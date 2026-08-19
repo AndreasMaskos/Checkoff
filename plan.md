@@ -31,7 +31,8 @@ Last updated 2026-08-18.
 | 10 | Visual design pass | done |
 | 11 | Photo log — picture or clip + description per step, timestamped | done, live |
 | 12 | Log keeps deleted entries until permanently deleted | done, live |
-| 13 | Log search, purge of a deleted checklist and its log | done, live |
+| 13 | Log search, per checklist and across every log | done, live |
+| 14 | Purge of a deleted checklist and its log | done, live |
 | — | Supabase Auth → URL Configuration redirect URLs | **verify in dashboard** |
 
 The last row is the one thing that can't be checked from code: magic links and
@@ -152,9 +153,14 @@ Their log view carries the one button that ends it: **Delete checklist and log
 permanently** removes the stored files, then the `lists` row — `log_entries` and
 `shares` cascade off it, so the files are the only part done by hand.
 
-**Search** filters the open log by description *and* step text, client-side over
-the rows already fetched. Deleting patches those rows in place instead of
+**Search** filters by description, step text *and* checklist name, client-side
+over the rows already fetched. Deleting patches those rows in place instead of
 refetching, so a search survives it.
+
+**"Search all logs"** on home is the same screen with `showLog(null)`: no
+`list_id` filter, every entry labelled with the checklist it came from. One fetch
+and one signing call for the lot — fine while entries number in the hundreds; the
+filter moves into PostgREST (`or(note.ilike…)`) when they run to thousands.
 
 - `step_text` is a **snapshot**. Renaming a step later must not rewrite what the
   log says was done at the time.
@@ -280,8 +286,7 @@ interaction: challenge, response, next item.
   on the first sync — the sign-in wall is a gate on the UI, not a wipe.
 - Log entries have no restore and no bulk purge: deleted ones accumulate until
   each is permanently deleted by hand. Fine at lab volume, revisit at thousands.
-- Search covers one checklist's log at a time, not every log at once, and matches
-  plain substrings — no fuzzy matching, no search by date.
+- Search matches plain substrings — no fuzzy matching, no search by date.
 - Purging a checklist from one device can be undone by another that still holds
   the tombstone: its next sync re-pushes an empty shell. The log stays gone.
 - Magic-link email uses Supabase's shared SMTP on the free tier — a few per hour.
