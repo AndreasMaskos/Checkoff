@@ -299,6 +299,10 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
       <span class="eyebrow">New email</span>
       <input id="newEmail" type="email" autocomplete="email" placeholder="you@example.com">
     </label>
+    <label>
+      <span class="eyebrow">Current password</span>
+      <input id="emailPass" type="password" autocomplete="current-password" placeholder="Confirm it is you">
+    </label>
     <div class="row">
       <button class="btn go" onclick="changeEmail()">Change email</button>
       <span class="note" id="emailMsg"></span>
@@ -1216,7 +1220,7 @@ function setMode(mode) {
 function showAccount() {
   $('acctWho').textContent = user?.email ?? '';
   $('newEmail').value = '';
-  $('oldPass').value = $('newPass').value = '';
+  $('emailPass').value = $('oldPass').value = $('newPass').value = '';
   note($('emailMsg'), '');
   note($('passMsg'), '');
   show('account');
@@ -1224,22 +1228,29 @@ function showAccount() {
 async function changeEmail() {
   const email = $('newEmail').value.trim();
   if (!email) return note($('emailMsg'), 'Enter the new address first.', true);
+  if (email === user.email) return note($('emailMsg'), 'That is the address you already use.', true);
+  if (!$('emailPass').value) return note($('emailMsg'), 'Enter your current password to confirm.', true);
   note($('emailMsg'), 'Working…');
+  if (!await proveIdentity($('emailPass').value)) return note($('emailMsg'), 'That is not your current password.', true);
   const { error } = await sb.auth.updateUser({ email }, { emailRedirectTo: location.href.split('#')[0] });
-  note($('emailMsg'), error ? error.message : 'Check the new inbox for the confirmation link.', !!error);
+  if (error) return note($('emailMsg'), error.message, true);
+  $('emailPass').value = '';
+  note($('emailMsg'), 'Check the new inbox for the confirmation link.');
 }
-// Supabase will change the password of any live session without asking what the
-// old one was — an unlocked phone on a bench would be enough. Proving the current
-// password by signing in with it is the check it does not do for us. A failed
-// attempt returns an error and leaves the existing session alone.
+// Supabase changes the email or the password of any live session without asking
+// what the current password was — an unlocked phone on a bench would be enough,
+// and moving the address away is the bigger of the two thefts. Signing in with
+// the password is the proof it does not ask for. A wrong attempt returns an
+// error and leaves the existing session alone.
+const proveIdentity = async password =>
+  !(await sb.auth.signInWithPassword({ email: user.email, password })).error;
 async function changePassword() {
   const current = $('oldPass').value, password = $('newPass').value;
   if (!current) return note($('passMsg'), 'Enter your current password first.', true);
   if (password.length < 6) return note($('passMsg'), 'The new password needs at least 6 characters.', true);
   if (password === current) return note($('passMsg'), 'That is the password you already have.', true);
   note($('passMsg'), 'Working…');
-  const { error: wrong } = await sb.auth.signInWithPassword({ email: user.email, password: current });
-  if (wrong) return note($('passMsg'), 'That is not your current password.', true);
+  if (!await proveIdentity(current)) return note($('passMsg'), 'That is not your current password.', true);
   const { error } = await sb.auth.updateUser({ password });
   if (error) return note($('passMsg'), error.message, true);
   $('oldPass').value = $('newPass').value = '';
