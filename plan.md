@@ -36,6 +36,7 @@ Last updated 2026-08-18.
 | 15 | Export of the filtered log — standalone HTML or CSV | done, live |
 | 16 | Offline upload queue, run ids, notes without a picture | done, live |
 | 17 | Dictated descriptions, run history | done, live |
+| 18 | Account page (email, password), editable log entries | done, live |
 | — | Supabase Auth → URL Configuration redirect URLs | **verify in dashboard** |
 
 The last row is the one thing that can't be checked from code: magic links and
@@ -145,6 +146,15 @@ first tap expands it rather than landing on the play button.
 log_entries: { id, list_id, owner, step, step_text, note, path, created_at, deleted_at }
 ```
 
+**Entries are editable.** A dictated description comes out wrong, a picture gets
+taken one step late, a better one is shot afterwards — **Edit** on your own entry
+changes the description, which step it belongs to (a dropdown of the checklist's
+current steps, with `step_text` re-snapshotted from the one picked), and the
+picture or clip itself. A replacement is uploaded first and the old file removed
+only once the row points at the new one, so a failed upload cannot leave an entry
+pointing at nothing. Online only: an edit is a correction, not a capture, so it
+does not go through the offline queue.
+
 **Deleting is two stages, because a log is a record.** "Delete" only sets
 `deleted_at`: the entry stays in the log, struck through and dated, and its
 button becomes "Delete permanently" — the only thing that removes the file and
@@ -231,7 +241,9 @@ newest first, with the per-step times and what got skipped.
 ## Accounts
 
 Email + password sign up and sign in on a dedicated screen, magic link as the
-alternative. An account is **required**: signed out, the sign-in screen is the
+alternative. Once in, **Account** on home changes the email address (confirmed by
+a link to the new inbox; the old one keeps working until then), changes the
+password, and signs out. An account is **required**: signed out, the sign-in screen is the
 only screen, with no way past it.
 
 The gate is one line in `show()`, the funnel every section change already goes
