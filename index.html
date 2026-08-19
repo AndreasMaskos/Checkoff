@@ -243,8 +243,16 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
 <section id="logView" class="hidden">
   <p class="eyebrow" style="padding-top:1.25rem">Log</p>
   <h1 id="logTitle" style="font:650 1.75rem/1.15 var(--sans);letter-spacing:-.03em;margin:.2rem 0 1.25rem"></h1>
+  <label>
+    <span class="eyebrow">Search descriptions</span>
+    <input id="logSearch" type="search" placeholder="Words from a description or step">
+  </label>
   <div id="logBody"></div>
-  <p style="margin-top:1.5rem"><button class="btn quiet" onclick="renderHome()">← Back to my checklists</button></p>
+  <div class="row" style="margin-top:1.5rem">
+    <button class="btn quiet" onclick="renderHome()">← Back to my checklists</button>
+    <span class="spacer"></span>
+    <button class="btn quiet hidden" id="logPurge">Delete checklist and log permanently</button>
+  </div>
 </section>
 
 <!-- ============ auth ============ -->
@@ -294,9 +302,11 @@ const visible = () => db.lists.filter(l => !l.deleted);
 const mine = l => !l.owner || l.owner === user?.id;
 
 function touch(list) { list.updatedAt = Date.now(); saveLocal(); push([list]); }
+let screen = 'home';
 function show(id) {
   if (sb && !user && id !== 'auth') id = 'auth';   // signing in is not optional once sync is configured
   for (const s of document.querySelectorAll('section')) s.classList.toggle('hidden', s.id !== id);
+  screen = id;
   scrollTo(0, 0);
 }
 
@@ -528,55 +538,89 @@ async function saveShot() {
   cancelShot();
 }
 
-let logList = null;
+let logList = null, logRows = [], logUrls = {};
 // One handler for every entry: expanded video keeps its controls, so only a
 // picture collapses again on click.
 $('logBody').onclick = e => {
   const m = e.target.closest('.media');
   if (m && (!m.classList.contains('big') || e.target.tagName === 'IMG')) m.classList.toggle('big');
 };
+$('logSearch').oninput = () => renderEntries();
+
 async function showLog(id) {
-  logList = id;
-  $('logTitle').textContent = byId(id).title;
+  const l = byId(id);
+  logList = id; logRows = []; logUrls = {};
+  $('logTitle').textContent = l.title;
+  $('logSearch').value = '';
+  $('logPurge').classList.toggle('hidden', !(l.deleted && mine(l)));
+  $('logPurge').onclick = () => purgeList(id);
   $('logBody').innerHTML = '<p class="note">Loading…</p>';
   show('logView');
   if (!user) return $('logBody').innerHTML = '<p class="note">Sign in to see this checklist’s log.</p>';
   const { data, error } = await sb.from('log_entries').select('*')
     .eq('list_id', id).order('created_at', { ascending: false });
   if (error) return $('logBody').innerHTML = `<p class="note bad">${esc(error.message)}</p>`;
-  if (!data.length) return $('logBody').innerHTML =
-    '<p class="note">Nothing logged yet. Start the checklist and tap Photo/video on a step.</p>';
-
+  logRows = data;
   const paths = data.map(e => e.path).filter(Boolean);
   const { data: signed } = paths.length ? await sb.storage.from('logs').createSignedUrls(paths, 3600) : { data: [] };
-  const url = Object.fromEntries((signed || []).map(s => [s.path, s.signedUrl]));
-  $('logBody').replaceChildren(...data.map(e => {
-    const gone = !!e.deleted_at;
-    const card = make('div', { className: gone ? 'entry gone' : 'entry', innerHTML:
-      `<div class="meta"><span>${pad2(e.step + 1)} · ${esc(e.step_text)}</span>` +
-      (gone ? `<span class="badge">deleted ${esc(stamp(e.deleted_at))}</span>` : '') +
-      `<span class="when">${esc(stamp(e.created_at))}</span></div>` +
-      (url[e.path] ? '<div class="media">' + (isClip(e.path)
-        ? `<video src="${url[e.path]}" controls playsinline preload="metadata"></video>`
-        : `<img src="${url[e.path]}" alt="${esc(e.note || e.step_text)}" loading="lazy">`) + '</div>' : '') +
-      (e.note ? `<p>${esc(e.note)}</p>` : '') });
-    if (e.owner === user.id) card.append(gone
-      ? button('Delete permanently', () => purgeEntry(e), 'btn quiet')
-      : button('Delete', () => removeEntry(e), 'btn quiet'));
-    return card;
-  }));
+  logUrls = Object.fromEntries((signed || []).map(s => [s.path, s.signedUrl]));
+  renderEntries();
+}
+function renderEntries() {
+  const q = $('logSearch').value.trim().toLowerCase();
+  const rows = logRows.filter(e => !q || `${e.note} ${e.step_text}`.toLowerCase().includes(q));
+  if (!rows.length) return $('logBody').innerHTML = logRows.length
+    ? '<p class="note">No description or step matches that.</p>'
+    : '<p class="note">Nothing logged yet. Start the checklist and tap Photo/video on a step.</p>';
+  $('logBody').replaceChildren(...rows.map(entryCard));
+}
+function entryCard(e) {
+  const gone = !!e.deleted_at, url = logUrls[e.path];
+  const card = make('div', { className: gone ? 'entry gone' : 'entry', innerHTML:
+    `<div class="meta"><span>${pad2(e.step + 1)} · ${esc(e.step_text)}</span>` +
+    (gone ? `<span class="badge">deleted ${esc(stamp(e.deleted_at))}</span>` : '') +
+    `<span class="when">${esc(stamp(e.created_at))}</span></div>` +
+    (url ? '<div class="media">' + (isClip(e.path)
+      ? `<video src="${url}" controls playsinline preload="metadata"></video>`
+      : `<img src="${url}" alt="${esc(e.note || e.step_text)}" loading="lazy">`) + '</div>' : '') +
+    (e.note ? `<p>${esc(e.note)}</p>` : '') });
+  if (e.owner === user.id) card.append(gone
+    ? button('Delete permanently', () => purgeEntry(e), 'btn quiet')
+    : button('Delete', () => removeEntry(e), 'btn quiet'));
+  return card;
 }
 // Two stages on purpose: a log is a record, so "delete" only marks it. The entry
 // stays in the log, struck through and dated, until it is deliberately purged.
+// Both patch logRows in place rather than refetching, so a search survives.
 async function removeEntry(e) {
-  await sb.from('log_entries').update({ deleted_at: new Date().toISOString() }).eq('id', e.id);
-  showLog(logList);
+  const { error } = await sb.from('log_entries').update({ deleted_at: new Date().toISOString() }).eq('id', e.id);
+  if (error) return alert(error.message);
+  e.deleted_at = new Date().toISOString();
+  renderEntries();
 }
 async function purgeEntry(e) {
   if (!confirm('Delete this permanently? The picture and the entry are gone for good.')) return;
   if (e.path) await sb.storage.from('logs').remove([e.path]);
-  await sb.from('log_entries').delete().eq('id', e.id);
-  showLog(logList);
+  const { error } = await sb.from('log_entries').delete().eq('id', e.id);
+  if (error) return alert(error.message);
+  logRows = logRows.filter(x => x.id !== e.id);
+  renderEntries();
+}
+// The whole checklist and its log, for good. log_entries and shares cascade off
+// the lists row; the stored files are the only part that has to go by hand.
+// ponytail: another device still holding the tombstone re-pushes an empty shell
+// on its next sync. Harmless — the log is gone. Fix by syncing purges if it nags.
+async function purgeList(id) {
+  const l = byId(id);
+  if (!confirm(`Permanently delete “${l.title}” and its whole log? This cannot be undone.`)) return;
+  const { data } = await sb.from('log_entries').select('path').eq('list_id', id);
+  const paths = (data || []).map(e => e.path).filter(Boolean);
+  if (paths.length) await sb.storage.from('logs').remove(paths);
+  const { error } = await sb.from('lists').delete().eq('id', id);
+  if (error) return alert(error.message);
+  db.lists = db.lists.filter(x => x.id !== id);
+  saveLocal();
+  renderHome();
 }
 
 setInterval(tick, 1000);
@@ -687,7 +731,9 @@ async function sync() {
   db.lists = lists;
   saveLocal();
   await push(outbox);
-  if (!run) renderHome();
+  // Only the home screen is ours to redraw. Coming back to the tab must not
+  // throw you out of a log, an edit in progress, or a run.
+  if (screen === 'home' || screen === 'auth') renderHome();
 }
 
 /* ================= sharing ================= */
