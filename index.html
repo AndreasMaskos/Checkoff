@@ -56,7 +56,7 @@ header .eyebrow { margin-left: auto; }
 .btn.quiet { background: none; border-color: transparent; color: var(--dim); padding-inline: .4rem; }
 .btn.quiet:hover { color: var(--fg); }
 :where(button, input, textarea, a):focus-visible { outline: 2px solid var(--go); outline-offset: 2px; }
-input, textarea {
+input, textarea, select {
   font: 400 1rem/1.5 var(--sans); width: 100%; padding: .7rem .8rem; color: var(--fg);
   background: var(--panel); border: 1px solid var(--line); border-radius: 5px;
 }
@@ -254,6 +254,15 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
     <label style="flex:1;min-width:9rem;margin:0"><span class="eyebrow">To</span><input id="logTo" type="date"></label>
     <button class="btn quiet" id="logClear">Clear</button>
   </div>
+  <label>
+    <span class="eyebrow">Order</span>
+    <select id="logSort">
+      <option value="new">Newest first</option>
+      <option value="old">Oldest first</option>
+      <option value="step">Step order, then newest</option>
+      <option value="list">Checklist, then newest</option>
+    </select>
+  </label>
   <div id="logBody"></div>
   <div class="row" style="margin-top:1.5rem">
     <button class="btn quiet" onclick="renderHome()">← Back to my checklists</button>
@@ -553,8 +562,20 @@ $('logBody').onclick = e => {
   const m = e.target.closest('.media');
   if (m && (!m.classList.contains('big') || e.target.tagName === 'IMG')) m.classList.toggle('big');
 };
-for (const id of ['logSearch', 'logFrom', 'logTo']) $(id).oninput = () => renderEntries();
-$('logClear').onclick = () => { for (const id of ['logSearch', 'logFrom', 'logTo']) $(id).value = ''; renderEntries(); };
+for (const id of ['logSearch', 'logFrom', 'logTo', 'logSort']) $(id).oninput = () => renderEntries();
+$('logClear').onclick = () => {
+  for (const id of ['logSearch', 'logFrom', 'logTo']) $(id).value = '';
+  $('logSort').value = 'new';
+  renderEntries();
+};
+// The chosen order sticks across checklists; only Clear puts it back to newest.
+const newest = (a, b) => b.created_at.localeCompare(a.created_at);      // ISO strings sort as dates
+const SORTS = {
+  new: newest,
+  old: (a, b) => a.created_at.localeCompare(b.created_at),
+  step: (a, b) => a.step - b.step || newest(a, b),
+  list: (a, b) => listTitle(a).localeCompare(listTitle(b)) || newest(a, b),
+};
 // An entry's day in the reader's own timezone — a picture taken at 23:30 belongs
 // to that evening, not to the next UTC day.
 const day = iso => { const d = new Date(iso); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
@@ -589,7 +610,8 @@ function renderEntries() {
   const from = $('logFrom').value, to = $('logTo').value;      // '' = open-ended; both ends inclusive
   const rows = logRows.filter(e =>
     (!q || `${e.note} ${e.step_text} ${listTitle(e)}`.toLowerCase().includes(q)) &&
-    (!from || day(e.created_at) >= from) && (!to || day(e.created_at) <= to));
+    (!from || day(e.created_at) >= from) && (!to || day(e.created_at) <= to))
+    .sort(SORTS[$('logSort').value]);
   if (!rows.length) return $('logBody').innerHTML = logRows.length
     ? '<p class="note">Nothing matches those filters.</p>'
     : `<p class="note">${logList === null ? 'No logs yet.' : 'Nothing logged yet.'} ` +
@@ -924,6 +946,10 @@ if (location.hash === '#test') {
   eq(extOf('clip', 'video/mp4'), '.mp4');                     // no extension: fall back to the mime type
   eq([isClip('x/y.mov'), isClip('x/y.jpg')], [true, false]);  // and it round-trips on the way back down
   eq(day(new Date(2026, 7, 5, 23, 30).toISOString()), '2026-08-05');   // late evening stays on its own day
+  const ent = (t, step = 0) => ({ created_at: `2026-08-1${t}T09:00:00Z`, step });
+  eq([ent(1), ent(3), ent(2)].sort(SORTS.new).map(e => e.created_at.slice(8, 10)), ['13', '12', '11']);
+  eq([ent(1), ent(3), ent(2)].sort(SORTS.old).map(e => e.created_at.slice(8, 10)), ['11', '12', '13']);
+  eq([...[ent(1, 5), ent(3, 2), ent(2, 2)]].sort(SORTS.step).map(e => e.step), [2, 2, 5]);   // step wins, newest breaks the tie
   const row = (id, t, at, owner = 'me') => ({ id, owner, title: t, items: [], deleted: false,
     share_token: null, share_mode: 'copy', updated_at: new Date(at).toISOString() });
   eq(merge([], [row('a', 'A', 10)], 'me').lists.length, 1);                       // remote arrives

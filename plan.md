@@ -31,7 +31,7 @@ Last updated 2026-08-18.
 | 10 | Visual design pass | done |
 | 11 | Photo log — picture or clip + description per step, timestamped | done, live |
 | 12 | Log keeps deleted entries until permanently deleted | done, live |
-| 13 | Log search, per checklist and across every log | done, live |
+| 13 | Log search, date range and sort order, per checklist and across every log | done, live |
 | 14 | Purge of a deleted checklist and its log | done, live |
 | — | Supabase Auth → URL Configuration redirect URLs | **verify in dashboard** |
 
@@ -159,6 +159,10 @@ inclusive, either end optional), all client-side over the rows already fetched.
 Dates compare on the reader's local day, so a picture taken at 23:30 belongs to
 that evening rather than to the next UTC one. Deleting patches those rows in
 place instead of refetching, so the filters survive it.
+
+**Order** is the reader's choice: newest first (the default), oldest first, by
+step — which groups every run's picture of the same step together — or by
+checklist. It sticks while you move between logs; only Clear resets it.
 
 **"Search all logs"** on home is the same screen with `showLog(null)`: no
 `list_id` filter, every entry labelled with the checklist it came from. One fetch
