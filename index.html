@@ -247,8 +247,13 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
   <h1 id="logTitle" style="font:650 1.75rem/1.15 var(--sans);letter-spacing:-.03em;margin:.2rem 0 1.25rem"></h1>
   <label>
     <span class="eyebrow">Search descriptions</span>
-    <input id="logSearch" type="search" placeholder="Words from a description or step">
+    <input id="logSearch" type="search" placeholder="Words from a description, step or checklist">
   </label>
+  <div class="row" style="margin-bottom:1rem">
+    <label style="flex:1;min-width:9rem;margin:0"><span class="eyebrow">From</span><input id="logFrom" type="date"></label>
+    <label style="flex:1;min-width:9rem;margin:0"><span class="eyebrow">To</span><input id="logTo" type="date"></label>
+    <button class="btn quiet" id="logClear">Clear</button>
+  </div>
   <div id="logBody"></div>
   <div class="row" style="margin-top:1.5rem">
     <button class="btn quiet" onclick="renderHome()">← Back to my checklists</button>
@@ -548,7 +553,11 @@ $('logBody').onclick = e => {
   const m = e.target.closest('.media');
   if (m && (!m.classList.contains('big') || e.target.tagName === 'IMG')) m.classList.toggle('big');
 };
-$('logSearch').oninput = () => renderEntries();
+for (const id of ['logSearch', 'logFrom', 'logTo']) $(id).oninput = () => renderEntries();
+$('logClear').onclick = () => { for (const id of ['logSearch', 'logFrom', 'logTo']) $(id).value = ''; renderEntries(); };
+// An entry's day in the reader's own timezone — a picture taken at 23:30 belongs
+// to that evening, not to the next UTC day.
+const day = iso => { const d = new Date(iso); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
 
 const listTitle = e => byId(e.list_id)?.title ?? 'Unknown checklist';
 
@@ -559,7 +568,7 @@ async function showLog(id) {
   const l = id === null ? null : byId(id);
   logList = id; logRows = []; logUrls = {};
   $('logTitle').textContent = l ? l.title : 'All logs';
-  $('logSearch').value = '';
+  for (const f of ['logSearch', 'logFrom', 'logTo']) $(f).value = '';
   $('logPurge').classList.toggle('hidden', !(l?.deleted && mine(l)));
   $('logPurge').onclick = () => purgeList(id);
   $('logBody').innerHTML = '<p class="note">Loading…</p>';
@@ -577,9 +586,12 @@ async function showLog(id) {
 }
 function renderEntries() {
   const q = $('logSearch').value.trim().toLowerCase();
-  const rows = logRows.filter(e => !q || `${e.note} ${e.step_text} ${listTitle(e)}`.toLowerCase().includes(q));
+  const from = $('logFrom').value, to = $('logTo').value;      // '' = open-ended; both ends inclusive
+  const rows = logRows.filter(e =>
+    (!q || `${e.note} ${e.step_text} ${listTitle(e)}`.toLowerCase().includes(q)) &&
+    (!from || day(e.created_at) >= from) && (!to || day(e.created_at) <= to));
   if (!rows.length) return $('logBody').innerHTML = logRows.length
-    ? '<p class="note">No description, step or checklist matches that.</p>'
+    ? '<p class="note">Nothing matches those filters.</p>'
     : `<p class="note">${logList === null ? 'No logs yet.' : 'Nothing logged yet.'} ` +
       'Start a checklist and tap Photo/video on a step.</p>';
   $('logBody').replaceChildren(...rows.map(entryCard));
@@ -911,6 +923,7 @@ if (location.hash === '#test') {
   eq(extOf('IMG_0042.MOV', 'video/quicktime'), '.mov');       // extension wins, lowercased
   eq(extOf('clip', 'video/mp4'), '.mp4');                     // no extension: fall back to the mime type
   eq([isClip('x/y.mov'), isClip('x/y.jpg')], [true, false]);  // and it round-trips on the way back down
+  eq(day(new Date(2026, 7, 5, 23, 30).toISOString()), '2026-08-05');   // late evening stays on its own day
   const row = (id, t, at, owner = 'me') => ({ id, owner, title: t, items: [], deleted: false,
     share_token: null, share_mode: 'copy', updated_at: new Date(at).toISOString() });
   eq(merge([], [row('a', 'A', 10)], 'me').lists.length, 1);                       // remote arrives

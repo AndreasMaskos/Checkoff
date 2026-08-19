@@ -153,9 +153,12 @@ Their log view carries the one button that ends it: **Delete checklist and log
 permanently** removes the stored files, then the `lists` row — `log_entries` and
 `shares` cascade off it, so the files are the only part done by hand.
 
-**Search** filters by description, step text *and* checklist name, client-side
-over the rows already fetched. Deleting patches those rows in place instead of
-refetching, so a search survives it.
+**Search** filters by description, step text *and* checklist name, narrowed by an
+optional **From**/**To** date range (native `<input type="date">`, both ends
+inclusive, either end optional), all client-side over the rows already fetched.
+Dates compare on the reader's local day, so a picture taken at 23:30 belongs to
+that evening rather than to the next UTC one. Deleting patches those rows in
+place instead of refetching, so the filters survive it.
 
 **"Search all logs"** on home is the same screen with `showLog(null)`: no
 `list_id` filter, every entry labelled with the checklist it came from. One fetch
@@ -286,7 +289,7 @@ interaction: challenge, response, next item.
   on the first sync — the sign-in wall is a gate on the UI, not a wipe.
 - Log entries have no restore and no bulk purge: deleted ones accumulate until
   each is permanently deleted by hand. Fine at lab volume, revisit at thousands.
-- Search matches plain substrings — no fuzzy matching, no search by date.
+- Search matches plain substrings — no fuzzy matching.
 - Purging a checklist from one device can be undone by another that still holds
   the tombstone: its next sync re-pushes an empty shell. The log stays gone.
 - Magic-link email uses Supabase's shared SMTP on the free tier — a few per hour.
