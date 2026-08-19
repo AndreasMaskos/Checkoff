@@ -321,6 +321,12 @@ interaction: challenge, response, next item.
 - **Migrations deploy on push to main** via the Supabase GitHub integration.
   Verified working. Always confirm against the live API afterwards
   (`curl $URL/rest/v1/lists?select=id -H "apikey: …"`) rather than trusting it.
+- **Storage stays on Supabase** (decided 2026-08-19). Backblaze B2 is ~3.5× cheaper
+  per GB, but it has never heard of our users: access control would move out of the
+  Postgres policies into an Edge Function we maintain, and a presigned URL bypasses
+  RLS by construction. Pro includes 100 GB, so B2 saves nothing below that and about
+  $5/month at 500 GB. Revisit past ~1 TB, and only for video — `log_entries` stores a
+  path, so pointing clips at another bucket stays a contained change.
 - **Storage objects are named by list, not by user** (`<list_id>/<uuid>.jpg`).
   Naming them by uploader would have split a shared checklist's log into private
   piles and made the policy disagree with the table's.
