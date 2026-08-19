@@ -127,7 +127,9 @@ Evidence of what actually happened, kept per step. On any step of a run,
 **Photo/video** opens the camera or library; a picture is downscaled in the
 browser to 1600 px JPEG, a clip goes up as it was shot. Either is shown with an
 optional description before saving. **Log** on the home row lists everything for
-that checklist, newest first, images inline and clips as players.
+that checklist, newest first, at quarter width — click one to expand it, click a
+picture again to shrink it. A collapsed clip has a transparent overlay so the
+first tap expands it rather than landing on the play button.
 
 ```js
 log_entries: { id, list_id, owner, step, step_text, note, path, created_at, deleted_at }

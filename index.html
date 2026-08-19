@@ -132,8 +132,15 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
 
 /* --- photo log --- */
 #shotPreview :is(img, video), .entry :is(img, video) {
-  display: block; width: 100%; border-radius: 5px; margin-bottom: .75rem; background: var(--bg);
+  display: block; width: 100%; border-radius: 5px; background: var(--bg);
 }
+#shotPreview :is(img, video) { margin-bottom: .75rem; }
+/* Log media sits at a quarter width until it is clicked. The overlay takes that
+   first click so tapping a small clip expands it instead of hitting play. */
+.entry .media { position: relative; width: 25%; min-width: 7rem; margin-bottom: .75rem; }
+.entry .media.big { width: 100%; }
+.entry .media:not(.big)::after { content: ''; position: absolute; inset: 0; cursor: zoom-in; }
+.entry .media.big img { cursor: zoom-out; }
 .entry { border-bottom: 1px solid var(--line); padding: 1rem 0; }
 .entry .meta { display: flex; gap: .75rem; font-size: .6875rem; letter-spacing: .1em;
                text-transform: uppercase; color: var(--dim); margin-bottom: .5rem; }
@@ -522,6 +529,12 @@ async function saveShot() {
 }
 
 let logList = null;
+// One handler for every entry: expanded video keeps its controls, so only a
+// picture collapses again on click.
+$('logBody').onclick = e => {
+  const m = e.target.closest('.media');
+  if (m && (!m.classList.contains('big') || e.target.tagName === 'IMG')) m.classList.toggle('big');
+};
 async function showLog(id) {
   logList = id;
   $('logTitle').textContent = byId(id).title;
@@ -543,9 +556,9 @@ async function showLog(id) {
       `<div class="meta"><span>${pad2(e.step + 1)} · ${esc(e.step_text)}</span>` +
       (gone ? `<span class="badge">deleted ${esc(stamp(e.deleted_at))}</span>` : '') +
       `<span class="when">${esc(stamp(e.created_at))}</span></div>` +
-      (url[e.path] ? isClip(e.path)
+      (url[e.path] ? '<div class="media">' + (isClip(e.path)
         ? `<video src="${url[e.path]}" controls playsinline preload="metadata"></video>`
-        : `<img src="${url[e.path]}" alt="${esc(e.note || e.step_text)}" loading="lazy">` : '') +
+        : `<img src="${url[e.path]}" alt="${esc(e.note || e.step_text)}" loading="lazy">`) + '</div>' : '') +
       (e.note ? `<p>${esc(e.note)}</p>` : '') });
     if (e.owner === user.id) card.append(gone
       ? button('Delete permanently', () => purgeEntry(e), 'btn quiet')
