@@ -216,6 +216,10 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
       <span class="eyebrow">Description — optional</span>
       <input id="shotNote" placeholder="What this shows">
     </label>
+    <div class="row" style="margin:-.5rem 0 1rem">
+      <button class="btn" id="dictBtn" onclick="dictate()">Dictate</button>
+      <span class="note" id="dictMsg"></span>
+    </div>
     <div class="row">
       <button class="btn go" onclick="saveShot()">Save to log</button>
       <button class="btn" onclick="cancelShot()">Cancel</button>
@@ -274,6 +278,14 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
     <span class="spacer"></span>
     <button class="btn quiet hidden" id="logPurge">Delete checklist and log permanently</button>
   </div>
+</section>
+
+<!-- ============ runs ============ -->
+<section id="runsView" class="hidden">
+  <p class="eyebrow" style="padding-top:1.25rem">Run history</p>
+  <h1 id="runsTitle" style="font:650 1.75rem/1.15 var(--sans);letter-spacing:-.03em;margin:.2rem 0 1.25rem"></h1>
+  <div id="runsBody"></div>
+  <p style="margin-top:1.5rem"><button class="btn quiet" onclick="renderHome()">← Back to my checklists</button></p>
 </section>
 
 <!-- ============ auth ============ -->
@@ -355,7 +367,7 @@ function renderHome() {
     li.append(make('div', { className: 'row acts' }, [
       button('Start', () => start(l.id), 'btn go'),
       button('Edit', () => edit(l.id)),
-      ...(sb ? [button('Log', () => showLog(l.id))] : []),
+      ...(sb ? [button('Log', () => showLog(l.id)), button('Runs', () => showRuns(l.id))] : []),
     ]));
     ul.append(li);
   }
@@ -427,7 +439,7 @@ const pad2 = i => String(i).padStart(2, '0');
 function start(id) {
   const list = byId(id);
   const steps = list.items.map(parseStep);
-  run = { id, runId: crypto.randomUUID(), title: list.title, steps, at: 0,
+  run = { id, runId: crypto.randomUUID(), title: list.title, steps, at: 0, startedAt: Date.now(),
           state: steps.map(() => null), times: steps.map(() => 0),
           enteredAt: Date.now(), deadline: 0, rang: false, history: [] };
   $('listName').textContent = list.title;
@@ -495,12 +507,29 @@ function mark(done) {
   leaveStep();
   run.at++;
   enterStep();
+  if (run.at >= run.steps.length) saveRun();     // finished: keep the history even if the tab dies here
 }
 function move(d) {
   if (d) { snapshot(); leaveStep(); run.at = Math.max(0, Math.min(run.steps.length, run.at + d)); }
   enterStep();
 }
-function quit() { if (listening) toggleMic(); cancelShot(); run = null; renderHome(); }
+function quit() { if (listening) toggleMic(); cancelShot(); saveRun(); run = null; renderHome(); }
+
+/* ================= run history =================
+   The runner already knows every step's elapsed time and whether it was done or
+   skipped. Saved on the way out and on completion — the same id both times, so
+   the upsert makes a finished-then-exited run one row, not two. A run nobody
+   touched is not history and is not written. */
+function saveRun() {
+  if (!run || !run.state.some(s => s !== null)) return;
+  leaveStep();                                  // bank the time on the step we are standing on
+  run.enteredAt = Date.now();
+  queueUp({ kind: 'run', row: {
+    id: run.runId, list_id: run.id, title: run.title,
+    started_at: new Date(run.startedAt).toISOString(), finished_at: new Date().toISOString(),
+    steps: run.steps.map((s, i) => ({ text: s.text, state: run.state[i], secs: Math.round(run.times[i] / 1000) })),
+  } });
+}
 
 /* ================= photo log =================
    A picture or clip of what actually happened on a step, timestamped, kept per
@@ -553,8 +582,41 @@ function newNote() {
   pending = { ...atStep(), blob: null, url: null, ext: '', type: '' };
   openShotPanel(null);
   note($('shotMsg'), '');
+  dictate();                                  // a note is words, and the tap that got here is the gesture iOS wants
+}
+
+/* --- dictation ----------------------------------------------------------
+   Gloved hands cannot type a description. The command recognizer is stopped
+   while dictating, or "done" in a sentence would check the step off mid-word;
+   it comes back on afterwards if it was on. */
+let dict = null;
+function dictate() {
+  if (dict) return dict.stop();
+  if (!SR) return note($('dictMsg'), 'This browser cannot dictate — Chrome, Edge or Safari can.', true);
+  const wasListening = listening;
+  if (listening) toggleMic();
+  const before = $('shotNote').value.trim();
+  dict = new SR();
+  dict.lang = LANG;
+  dict.continuous = true;
+  dict.interimResults = true;
+  dict.onresult = e => {
+    const heard = [...e.results].map(r => r[0].transcript).join(' ').replace(/\s+/g, ' ').trim();
+    $('shotNote').value = before ? `${before} ${heard}` : heard;
+  };
+  dict.onerror = e => note($('dictMsg'), e.error === 'not-allowed' ? 'Microphone blocked.' : e.error, true);
+  dict.onend = () => {
+    dict = null;
+    $('dictBtn').textContent = 'Dictate';
+    note($('dictMsg'), '');
+    if (wasListening && run) toggleMic();
+  };
+  dict.start();
+  $('dictBtn').textContent = 'Stop dictating';
+  note($('dictMsg'), 'Listening…');
 }
 function cancelShot() {
+  dict?.stop();
   if (pending?.url) URL.revokeObjectURL(pending.url);
   $('shotPreview').replaceChildren();
   $('shotPanel').classList.add('hidden');
@@ -578,6 +640,10 @@ const idb = (mode, fn) => new Promise((resolve, reject) => {
   };
 });
 const queued = () => idb('readonly', s => s.getAll());
+// A run keeps its own id as the queue key, so saving it twice replaces the first
+// copy instead of stacking two. Captures get a fresh one each time.
+const queueUp = item => idb('readwrite', s => s.put({ id: item.row?.id ?? crypto.randomUUID(), kind: 'entry', ...item }))
+  .then(queueBadge).catch(() => {});
 async function queueBadge() {
   const n = (await queued().catch(() => [])).length;
   const text = n ? `${n} waiting to upload` : '';
@@ -588,13 +654,11 @@ async function saveShot() {
   const text = $('shotNote').value.trim();
   if (!pending.blob && !text) return note($('shotMsg'), 'Write something first.', true);
   if (pending.blob?.size > MAX) return note($('shotMsg'), oversize(pending.blob), true);
-  await idb('readwrite', s => s.put({
-    id: crypto.randomUUID(), list: pending.list, run: pending.run, step: pending.step,
+  await queueUp({ list: pending.list, run: pending.run, step: pending.step,
     text: pending.text, note: text, blob: pending.blob, ext: pending.ext, type: pending.type,
     at: new Date().toISOString(),             // when it happened, not when it reached the server
-  }));
+  });
   cancelShot();
-  queueBadge();
   flushQueue();
 }
 let flushing = false;
@@ -603,6 +667,12 @@ async function flushQueue() {
   flushing = true;
   try {
     for (const item of await queued()) {
+      if (item.kind === 'run') {
+        const { error } = await sb.from('runs').upsert({ ...item.row, owner: user.id });
+        if (error) break;
+        await idb('readwrite', s => s.delete(item.id));
+        continue;
+      }
       let path = null;
       if (item.blob) {
         path = `${item.list}/${item.id}${item.ext}`;
@@ -797,6 +867,33 @@ function exportCsv() {
   download(logFileName() + '.csv', new Blob([csv], { type: 'text/csv;charset=utf-8' }));
 }
 const logFileName = () => $('logTitle').textContent.replace(/[^\w-]+/g, '-').toLowerCase() + '-log';
+
+/* --- run history view --------------------------------------------------- */
+async function showRuns(id) {
+  $('runsTitle').textContent = byId(id).title;
+  $('runsBody').innerHTML = '<p class="note">Loading…</p>';
+  show('runsView');
+  const { data, error } = await sb.from('runs').select('*')
+    .eq('list_id', id).order('started_at', { ascending: false });
+  if (error) return $('runsBody').innerHTML = `<p class="note bad">${esc(error.message)}</p>`;
+  if (!data.length) return $('runsBody').innerHTML =
+    '<p class="note">No runs recorded yet. Every run you start from here is kept once you check a step off.</p>';
+  $('runsBody').replaceChildren(...data.map(r => {
+    const total = r.steps.reduce((t, s) => t + s.secs, 0);
+    const done = r.steps.filter(s => s.state === true).length;
+    const skipped = r.steps.filter(s => s.state === false).length;
+    const left = r.steps.length - done - skipped;
+    return make('div', { className: 'entry', innerHTML:
+      `<div class="meta"><span class="which">${esc(stamp(r.started_at))}</span>` +
+      `<span>run ${esc(r.id.slice(0, 4))}</span>` +
+      `<span class="when">${mmss(total)}</span></div>` +
+      `<p class="note">${done} done · ${skipped} skipped` + (left ? ` · ${left} never reached` : '') + '</p>' +
+      r.steps.map((s, i) => `<div class="line${s.state === null ? '' : ' checked'}">` +
+        `<span class="num">${s.state === null ? pad2(i + 1) : s.state ? '✓' : '–'}</span>` +
+        `<span class="txt">${esc(s.text)}</span>` +
+        `<span class="num">${s.secs ? mmss(s.secs) : ''}</span></div>`).join('') });
+  }));
+}
 
 // The whole checklist and its log, for good. log_entries and shares cascade off
 // the lists row; the stored files are the only part that has to go by hand.
@@ -1065,7 +1162,8 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY) {
 
 /* ================= boot ================= */
 Object.assign(window, { $, edit, save, removeList, start, mark, move, undo, quit, toggleMic, renderHome, setMode,
-                        magicLink, saveShot, cancelShot, newNote, showLog, exportLog, exportCsv });
+                        magicLink, saveShot, cancelShot, newNote, dictate, showLog, showRuns,
+                        exportLog, exportCsv });
 if (!SR) $('support').textContent = 'Voice control needs Chrome, Edge or Safari — this browser has no Web Speech API.';
 setMode('up');
 // Settle the session before the first paint, or every signed-in load flashes the sign-in screen.
