@@ -35,6 +35,7 @@ Last updated 2026-08-18.
 | 14 | Purge of a deleted checklist and its log | done, live |
 | 15 | Export of the filtered log — standalone HTML or CSV | done, live |
 | 16 | Offline upload queue, run ids, notes without a picture | done, live |
+| 17 | Dictated descriptions, run history | done, live |
 | — | Supabase Auth → URL Configuration redirect URLs | **verify in dashboard** |
 
 The last row is the one thing that can't be checked from code: magic links and
@@ -211,6 +212,22 @@ filter moves into PostgREST (`or(note.ilike…)`) when they run to thousands.
   tag in the log, exported in full.
 - **A note needs no picture.** "Bleeding at 12:04" is a log entry; `path` stays null.
 
+## Run history
+
+Every run that had at least one step checked or skipped is kept: one `runs` row
+keyed by the same `run_id` its log entries carry, holding each step's state and
+elapsed seconds.
+
+```js
+runs: { id, list_id, owner, title, started_at, finished_at, steps: [{ text, state, secs }] }
+```
+
+Written twice — on completion and on the way out — and **upserted**, so finishing
+a checklist and then exiting is one row rather than two. It rides the same
+offline queue as the captures, keyed by the run id so a second save replaces the
+first in the queue instead of stacking. **Runs** on the home row shows them
+newest first, with the per-step times and what got skipped.
+
 ## Accounts
 
 Email + password sign up and sign in on a dedicated screen, magic link as the
@@ -251,6 +268,12 @@ on every `onend` because browsers end it after each phrase of silence.
 
 Matching is substring-on-word-start, so mis-hearings are cheap to absorb: `chek`
 is in the list purely because the recognizer produces it.
+
+**Dictation** reuses the same recognizer for the log's description field —
+gloved hands cannot type. Command recognition stops while dictating (or "done"
+in a sentence would check the step off) and resumes afterwards if it was on.
+Tapping **Note** starts dictation immediately: a note is words, and that tap is
+the user gesture iOS requires before opening the microphone.
 
 ## Timers and undo
 
@@ -312,7 +335,10 @@ interaction: challenge, response, next item.
   without a gesture.
 - Wake lock keeps the screen on during a run; unsupported on iOS < 16.4.
 - No view-only sharing role, no member list, no way to see who joined.
-- No run history, streaks, or reminders/notifications.
+- No streaks or reminders/notifications, and no export of run history — the log
+  exports, the timings do not.
+- Run history has no subject/animal id: a run is identified by its start time and
+  a four-character tag, not by what it was performed on.
 - The queue retries in order and stops at the first failure, so one wedged item
   blocks the rest. No per-item error surfacing beyond the "n waiting" count.
 - Queued captures are on **that device only** until they upload — a second phone
@@ -342,5 +368,5 @@ Nothing here is committed to; listed so the reasoning isn't re-derived later.
 3. Reorder steps by drag, if editing raw lines in the textarea starts to chafe.
 4. A "wake word" so the mic can stay off until called, instead of listening for
    the whole run.
-5. Run history proper — the per-step times and skips a run already collects,
-   written once at the finish and keyed by the `run_id` the log entries carry.
+5. A subject/animal id asked for at `start()` and stamped on the run and its
+   entries. The axis the log is actually searched by, and the one still missing.
