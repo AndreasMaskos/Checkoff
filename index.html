@@ -134,7 +134,9 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
 #shotPreview :is(img, video), .entry :is(img, video) {
   display: block; width: 100%; border-radius: 5px; background: var(--bg);
 }
-#shotPreview :is(img, video) { margin-bottom: .75rem; }
+/* auto-fit, so one file fills the width and four sit as a strip of thumbnails */
+#shotPreview { display: grid; gap: .5rem; margin-bottom: .75rem;
+               grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr)); }
 /* Log media sits at a quarter width until it is clicked. The overlay takes that
    first click so tapping a small clip expands it instead of hitting play. */
 .entry .media { position: relative; width: 25%; min-width: 7rem; margin-bottom: .75rem; }
@@ -234,7 +236,7 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
       <button class="btn" onclick="mark(false)">Skip</button>
       <button class="btn" onclick="$('shot').click()">Photo/video</button>
       <button class="btn" onclick="newNote()">Note</button>
-      <input id="shot" class="hidden" type="file" accept="image/*,video/*">
+      <input id="shot" class="hidden" type="file" accept="image/*,video/*" multiple>
       <button class="btn" onclick="move(-1)">Back</button>
       <button class="btn" onclick="undo()">Undo</button>
       <button class="btn quiet" onclick="quit()">Exit</button>
@@ -600,32 +602,41 @@ async function shrink(file) {                 // phone photos are 4 MB; 1600px o
 const atStep = () => ({ list: run.id, run: run.runId, step: run.at,
   text: run.at >= run.steps.length ? 'Checklist complete' : run.steps[run.at].text });
 
-function openShotPanel(media) {
-  $('shotStep').textContent = pending.text;
-  $('shotPreview').replaceChildren(...(media ? [media] : []));
+function openShotPanel() {
+  const n = pending.items.length;
+  $('shotStep').textContent = (n > 1 ? `${n} files · ` : '') + pending.text;
+  $('shotPreview').replaceChildren(...pending.items.map(it => it.clip
+    ? make('video', { src: it.url, controls: true, playsInline: true, preload: 'metadata' })
+    : make('img', { src: it.url, alt: 'About to be logged' })));
   $('shotNote').value = '';
   $('shotPanel').classList.remove('hidden');
   $('shotNote').focus();
 }
+// One step often needs several pictures — PSLAX, four chamber, the doppler trace.
+// They are picked together and share one description; each becomes its own entry,
+// so any of them can be edited, moved or deleted on its own afterwards.
 $('shot').onchange = async e => {
-  const file = e.target.files[0];
+  const files = [...e.target.files];
   e.target.value = '';                        // so the same file can be picked twice
-  if (!file || !run) return;
-  const clip = (file.type || '').startsWith('video/');
-  const blob = clip ? file : await shrink(file);   // ponytail: no transcoding, a clip goes up as it was shot
-  pending = { ...atStep(), blob, url: URL.createObjectURL(blob),
-              ext: clip ? extOf(file.name, file.type) : '.jpg',
-              type: clip ? file.type || 'video/mp4' : 'image/jpeg' };
-  openShotPanel(clip
-    ? make('video', { src: pending.url, controls: true, playsInline: true, preload: 'metadata' })
-    : make('img', { src: pending.url, alt: 'About to be logged' }));
-  note($('shotMsg'), blob.size > MAX ? oversize(blob) : '', blob.size > MAX);
+  if (!files.length || !run) return;
+  const items = [];
+  for (const file of files) {
+    const clip = (file.type || '').startsWith('video/');
+    const blob = clip ? file : await shrink(file);   // ponytail: no transcoding, a clip goes up as it was shot
+    items.push({ blob, clip, url: URL.createObjectURL(blob),
+                 ext: clip ? extOf(file.name, file.type) : '.jpg',
+                 type: clip ? file.type || 'video/mp4' : 'image/jpeg' });
+  }
+  pending = { ...atStep(), items };
+  openShotPanel();
+  const big = items.find(it => it.blob.size > MAX);
+  note($('shotMsg'), big ? oversize(big.blob) : '', !!big);
 };
 // Not everything worth logging has a picture: "bleeding at 12:04" is a log entry.
 function newNote() {
   if (!run) return;
-  pending = { ...atStep(), blob: null, url: null, ext: '', type: '' };
-  openShotPanel(null);
+  pending = { ...atStep(), items: [] };
+  openShotPanel();
   note($('shotMsg'), '');
   dictate();                                  // a note is words, and the tap that got here is the gesture iOS wants
 }
@@ -662,7 +673,7 @@ function dictate() {
 }
 function cancelShot() {
   dict?.stop();
-  if (pending?.url) URL.revokeObjectURL(pending.url);
+  for (const it of pending?.items ?? []) URL.revokeObjectURL(it.url);
   $('shotPreview').replaceChildren();
   $('shotPanel').classList.add('hidden');
   pending = null;
@@ -697,12 +708,13 @@ async function queueBadge() {
 async function saveShot() {
   if (!pending) return;
   const text = $('shotNote').value.trim();
-  if (!pending.blob && !text) return note($('shotMsg'), 'Write something first.', true);
-  if (pending.blob?.size > MAX) return note($('shotMsg'), oversize(pending.blob), true);
-  await queueUp({ list: pending.list, run: pending.run, step: pending.step,
-    text: pending.text, note: text, blob: pending.blob, ext: pending.ext, type: pending.type,
-    at: new Date().toISOString(),             // when it happened, not when it reached the server
-  });
+  if (!pending.items.length && !text) return note($('shotMsg'), 'Write something first.', true);
+  const big = pending.items.find(it => it.blob.size > MAX);
+  if (big) return note($('shotMsg'), oversize(big.blob), true);
+  const at = new Date().toISOString();        // when it happened, not when it reached the server
+  const shared = { list: pending.list, run: pending.run, step: pending.step, text: pending.text, note: text, at };
+  if (!pending.items.length) await queueUp({ ...shared, blob: null, ext: '', type: '' });
+  for (const it of pending.items) await queueUp({ ...shared, blob: it.blob, ext: it.ext, type: it.type });
   cancelShot();
   flushQueue();
 }
