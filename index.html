@@ -340,6 +340,7 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
   <div class="row" style="margin-top:1.5rem">
     <button class="btn" onclick="signOut()">Sign out</button>
   </div>
+  <p class="note" id="build" style="margin-top:1.5rem"></p>
 </section>
 
 <!-- ============ auth ============ -->
@@ -1301,6 +1302,9 @@ function setMode(mode) {
 /* --- account ------------------------------------------------------------- */
 function showAccount() {
   $('acctWho').textContent = user?.email ?? '';
+  // document.lastModified is the served page's Last-Modified — the deploy you are
+  // actually running. Nothing to bump by hand, so it cannot go stale or lie.
+  $('build').textContent = `Version of this page: ${stamp(new Date(document.lastModified).toISOString())}`;
   $('newEmail').value = '';
   $('emailPass').value = $('oldPass').value = $('newPass').value = '';
   note($('emailMsg'), '');
