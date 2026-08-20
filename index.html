@@ -139,12 +139,18 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
 /* auto-fit, so one file fills the width and four sit as a strip of thumbnails */
 #shotPreview { display: grid; gap: .5rem; margin-bottom: .75rem;
                grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr)); }
-/* Log media sits at a quarter width until it is clicked. The overlay takes that
-   first click so tapping a small clip expands it instead of hitting play. */
-.entry .media { position: relative; width: 25%; min-width: 7rem; margin-bottom: .75rem; }
-.entry .media.big { width: 100%; }
+/* Files logged together sit side by side. Each is a thumbnail until clicked; the
+   overlay takes that first tap so a small clip expands instead of hitting play. */
+.entry .mediaRow { display: grid; gap: .5rem; margin-bottom: .75rem;
+                   grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr)); }
+.entry .media { position: relative; }
+.entry .media.big { grid-column: 1 / -1; }
 .entry .media:not(.big)::after { content: ''; position: absolute; inset: 0; cursor: zoom-in; }
+.entry .media:not(.big) :is(img, video) { aspect-ratio: 1; object-fit: cover; }   /* a tidy row, not a ragged one */
 .entry .media.big img { cursor: zoom-out; }
+.entry .media.gone :is(img, video) { opacity: .4; }
+.entry .media .acts { display: none; }
+.entry .media.big .acts { display: flex; margin-top: .4rem; }
 .entry { border-bottom: 1px solid var(--line); padding: 1rem 0; }
 .entry .meta { display: flex; gap: .75rem; font-size: .6875rem; letter-spacing: .1em;
                text-transform: uppercase; color: var(--dim); margin-bottom: .5rem; }
@@ -820,26 +826,50 @@ function renderEntries() {
     ? '<p class="note">Nothing matches those filters.</p>'
     : `<p class="note">${logList === null ? 'No logs yet.' : 'Nothing logged yet.'} ` +
       'Start a checklist and tap Photo/video on a step.</p>';
-  $('logBody').replaceChildren(...rows.map(entryCard));
+  // Files logged together — same run, same step, same moment — were one action
+  // and read as one thing: a row of thumbnails under one description, not four
+  // near-identical cards down the page. They stay separate rows in the database,
+  // so each is still editable and deletable on its own.
+  const groups = [], byKey = new Map();
+  for (const e of rows) {
+    const key = e.run_id ? `${e.run_id}|${e.step}|${e.created_at}|${e.note}` : e.id;
+    if (!byKey.has(key)) byKey.set(key, groups[groups.push([]) - 1]);
+    byKey.get(key).push(e);
+  }
+  $('logBody').replaceChildren(...groups.map(groupCard));
 }
-function entryCard(e) {
-  const gone = !!e.deleted_at, url = logUrls[e.path];
+function groupCard(items) {
+  const head = items[0];
+  const gone = items.every(e => e.deleted_at);
   const card = make('div', { className: gone ? 'entry gone' : 'entry', innerHTML:
     '<div class="meta">' +
-    (logList === null ? `<span class="which">${esc(listTitle(e))}</span>` : '') +
-    `<span>${pad2(e.step + 1)} · ${esc(e.step_text)}</span>` +
-    (e.run_id ? `<span>run ${esc(runTag(e))}</span>` : '') +
-    (gone ? `<span class="badge">deleted ${esc(stamp(e.deleted_at))}</span>` : '') +
-    `<span class="when">${esc(stamp(e.created_at))}</span></div>` +
-    (url ? '<div class="media">' + (isClip(e.path)
-      ? `<video src="${url}" controls playsinline preload="metadata"></video>`
-      : `<img src="${url}" alt="${esc(e.note || e.step_text)}" loading="lazy">`) + '</div>' : '') +
-    (e.note ? `<p>${esc(e.note)}</p>` : '') });
-  if (e.owner === user.id) card.append(make('div', { className: 'row' }, gone
-    ? [button('Delete permanently', () => purgeEntry(e), 'btn quiet')]
-    : [button('Edit', () => editEntry(e, card)), button('Delete', () => removeEntry(e), 'btn quiet')]));
+    (logList === null ? `<span class="which">${esc(listTitle(head))}</span>` : '') +
+    `<span>${pad2(head.step + 1)} · ${esc(head.step_text)}</span>` +
+    (head.run_id ? `<span>run ${esc(runTag(head))}</span>` : '') +
+    (items.length > 1 ? `<span>${items.length} files</span>` : '') +
+    (gone ? `<span class="badge">deleted ${esc(stamp(head.deleted_at))}</span>` : '') +
+    `<span class="when">${esc(stamp(head.created_at))}</span></div>` +
+    (head.note ? `<p>${esc(head.note)}</p>` : '') });
+
+  const withFiles = items.filter(e => logUrls[e.path]);
+  if (withFiles.length) card.append(make('div', { className: 'mediaRow' }, withFiles.map(mediaCell)));
+  // A note with no picture has nowhere to hang its buttons, so they go in the card.
+  if (!withFiles.length && head.owner === user.id) card.append(actions(head, card));
   return card;
 }
+// Each file carries its own controls, revealed when it is expanded — collapsed,
+// the cell is a thumbnail and the overlay swallows the tap.
+function mediaCell(e) {
+  const url = logUrls[e.path];
+  const cell = make('div', { className: e.deleted_at ? 'media gone' : 'media', innerHTML: isClip(e.path)
+    ? `<video src="${url}" controls playsinline preload="metadata"></video>`
+    : `<img src="${url}" alt="${esc(e.note || e.step_text)}" loading="lazy">` });
+  if (e.owner === user.id) cell.append(actions(e, cell));
+  return cell;
+}
+const actions = (e, host) => make('div', { className: 'row acts' }, e.deleted_at
+  ? [button('Delete permanently', () => purgeEntry(e), 'btn quiet')]
+  : [button('Edit', () => editEntry(e, host.closest('.entry'))), button('Delete', () => removeEntry(e), 'btn quiet')]);
 /* --- editing an entry ---------------------------------------------------
    A log gets corrected: the description was dictated wrong, the picture went to
    the step before, or a better one was taken. The step dropdown reads the

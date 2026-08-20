@@ -141,9 +141,13 @@ optional description before saving. **Several files can be picked at once** — 
 step often needs the PSLAX, the four-chamber and the doppler trace — and they
 share the one description while each becomes its own entry, so any of them can be
 edited, moved to another step or deleted on its own. **Log** on the home row lists everything for
-that checklist, newest first, at quarter width — click one to expand it, click a
-picture again to shrink it. A collapsed clip has a transparent overlay so the
-first tap expands it rather than landing on the play button.
+that checklist, newest first. **Files logged together — same run, same step, same
+moment, same description — are shown as one card with a row of thumbnails**,
+because that is what they were: one action. They remain separate rows in the
+database, so each is edited and deleted on its own; a file's Edit and Delete
+appear when it is expanded. Clicking a thumbnail expands it across the row,
+clicking a picture again shrinks it, and a collapsed clip has a transparent
+overlay so the first tap expands it rather than landing on the play button.
 
 ```js
 log_entries: { id, list_id, owner, step, step_text, note, path, created_at, deleted_at }
