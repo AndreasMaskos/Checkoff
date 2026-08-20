@@ -826,17 +826,19 @@ function renderEntries() {
     ? '<p class="note">Nothing matches those filters.</p>'
     : `<p class="note">${logList === null ? 'No logs yet.' : 'Nothing logged yet.'} ` +
       'Start a checklist and tap Photo/video on a step.</p>';
-  // Files logged together — same run, same step, same moment — were one action
-  // and read as one thing: a row of thumbnails under one description, not four
-  // near-identical cards down the page. They stay separate rows in the database,
-  // so each is still editable and deletable on its own.
+  $('logBody').replaceChildren(...groupRows(rows).map(groupCard));
+}
+// Files logged together — same run, same step, same moment, same description —
+// were one action and read as one thing, on screen and in an export alike. They
+// stay separate rows in the database, so each is still editable on its own.
+function groupRows(rows) {
   const groups = [], byKey = new Map();
   for (const e of rows) {
     const key = e.run_id ? `${e.run_id}|${e.step}|${e.created_at}|${e.note}` : e.id;
     if (!byKey.has(key)) byKey.set(key, groups[groups.push([]) - 1]);
     byKey.get(key).push(e);
   }
-  $('logBody').replaceChildren(...groups.map(groupCard));
+  return groups;
 }
 function groupCard(items) {
   const head = items[0];
@@ -989,16 +991,22 @@ async function exportLog() {
   const btn = $('logExport');
   btn.disabled = true;
   const cards = [];
-  for (const [i, e] of rows.entries()) {
-    btn.textContent = `Preparing ${i + 1}/${rows.length}…`;
-    const url = logUrls[e.path];
-    const media = !url ? ''
-      : isClip(e.path) ? `<p class="clip">Video ${esc(e.path.split('/').pop())} — not embedded, it stays in the app.</p>`
-      : `<img src="${await dataUrl(url)}" alt="${esc(e.note || e.step_text)}">`;
-    cards.push(`<article${e.deleted_at ? ' class="gone"' : ''}>
-      <h2>${esc(listTitle(e))} · ${pad2(e.step + 1)} ${esc(e.step_text)}</h2>
-      <p class="when">${esc(stamp(e.created_at))}${e.run_id ? ` · run ${esc(runTag(e))}` : ''}${e.deleted_at ? ` · deleted ${esc(stamp(e.deleted_at))}` : ''}</p>
-      ${media}${e.note ? `<p>${esc(e.note)}</p>` : ''}</article>`);
+  let done = 0;
+  for (const items of groupRows(rows)) {
+    const head = items[0], gone = items.every(e => e.deleted_at), media = [];
+    for (const e of items) {
+      btn.textContent = `Preparing ${++done}/${rows.length}…`;
+      const url = logUrls[e.path];
+      if (!url) continue;
+      media.push(isClip(e.path)
+        ? `<p class="clip">Video ${esc(e.path.split('/').pop())} — not embedded, it stays in the app.</p>`
+        : `<img src="${await dataUrl(url)}" alt="${esc(head.note || head.step_text)}">`);
+    }
+    cards.push(`<article${gone ? ' class="gone"' : ''}>
+      <h2>${esc(listTitle(head))} · ${pad2(head.step + 1)} ${esc(head.step_text)}</h2>
+      <p class="when">${esc(stamp(head.created_at))}${head.run_id ? ` · run ${esc(runTag(head))}` : ''}${media.length > 1 ? ` · ${media.length} files` : ''}${gone ? ` · deleted ${esc(stamp(head.deleted_at))}` : ''}</p>
+      ${head.note ? `<p>${esc(head.note)}</p>` : ''}
+      ${media.length ? `<div class="files">${media.join('')}</div>` : ''}</article>`);
   }
   const title = `${$('logTitle').textContent} — Checkoff log`;
   const filters = [
@@ -1010,8 +1018,9 @@ async function exportLog() {
 <style>body{font:16px/1.5 system-ui,sans-serif;max-width:44rem;margin:2rem auto;padding:0 1rem;color:#14181D}
 h1{font-size:1.5rem;margin:0 0 .25rem}article{border-top:1px solid #D2D6CD;padding:1.25rem 0}
 h2{font-size:1rem;margin:0 0 .25rem}.when,.clip{color:#69707A;font-size:.8125rem;margin:0 0 .75rem}
-img{display:block;width:100%;border-radius:5px;margin-bottom:.75rem}.gone{opacity:.6}
-.gone h2{text-decoration:line-through}@media print{article{break-inside:avoid}}</style>
+img{display:block;width:100%;border-radius:5px}.gone{opacity:.6}
+.files{display:grid;gap:.5rem;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr))}
+.gone h2{text-decoration:line-through}@media print{article,img{break-inside:avoid}}</style>
 <h1>${esc(title)}</h1>
 <p class="when">${rows.length} ${rows.length === 1 ? 'entry' : 'entries'}${filters ? ', ' + esc(filters) : ''} · exported ${esc(stamp(new Date().toISOString()))}</p>
 ${cards.join('\n')}`;
