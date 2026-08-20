@@ -854,9 +854,12 @@ function editEntry(e, card) {
     : `<option value="${e.step}">${esc(e.step_text)}</option>`;
   const form = make('div', { className: 'panel editor', innerHTML: `
     <label><span class="eyebrow">Description</span><input class="edNote" value="${esc(e.note)}"></label>
-    <label><span class="eyebrow">Belongs to step</span><select class="edStep">${options}</select></label>
-    <label><span class="eyebrow">Replace the picture or clip — optional</span>
-      <input class="edFile" type="file" accept="image/*,video/*"></label>` });
+    <label><span class="eyebrow">Belongs to step</span><select class="edStep">${options}</select></label>` +
+    (e.path ? `<label class="row" style="gap:.5rem;margin-bottom:1rem">
+      <input type="checkbox" class="edDrop" style="width:auto">
+      <span class="note">Delete this ${isClip(e.path) ? 'clip' : 'picture'}</span></label>` : '') +
+    `<label><span class="eyebrow">${e.path ? 'Add more pictures or clips' : 'Add a picture or clip'}</span>
+      <input class="edFile" type="file" accept="image/*,video/*" multiple></label>` });
   form.append(make('div', { className: 'row' }, [
     button('Save', () => saveEntryEdit(e, form), 'btn go'),
     button('Cancel', () => renderEntries()),
@@ -865,32 +868,56 @@ function editEntry(e, card) {
   card.append(form);
   form.querySelector('.edNote').focus();
 }
+// Upload the additions first, then move the row, then delete what was dropped:
+// at no point does a row point at a file that is not there.
 async function saveEntryEdit(e, form) {
   const msg = form.querySelector('.edMsg');
   const step = +form.querySelector('.edStep').value;
   const items = byId(e.list_id)?.items ?? [];
+  const drop = !!form.querySelector('.edDrop')?.checked;
   const patch = { note: form.querySelector('.edNote').value.trim(), step,
                   step_text: items[step] ? parseStep(items[step]).text : e.step_text };
-  const file = form.querySelector('.edFile').files[0];
-  const old = e.path;
-  if (file) {
+  const files = [...form.querySelector('.edFile').files];
+  if (drop && !files.length && !patch.note)
+    return note(msg, 'That would leave nothing — delete the entry instead.', true);
+
+  const added = [];
+  for (const file of files) {
     const clip = (file.type || '').startsWith('video/');
     const blob = clip ? file : await shrink(file);
     if (blob.size > MAX) return note(msg, oversize(blob), true);
-    note(msg, 'Uploading…');
-    patch.path = `${e.list_id}/${crypto.randomUUID()}${clip ? extOf(file.name, file.type) : '.jpg'}`;
-    const up = await sb.storage.from('logs')
-      .upload(patch.path, blob, { contentType: clip ? file.type || 'video/mp4' : 'image/jpeg' });
-    if (up.error) return note(msg, up.error.message, true);
+    note(msg, `Uploading ${added.length + 1}/${files.length}…`);
+    const path = `${e.list_id}/${crypto.randomUUID()}${clip ? extOf(file.name, file.type) : '.jpg'}`;
+    const { error } = await sb.storage.from('logs')
+      .upload(path, blob, { contentType: clip ? file.type || 'video/mp4' : 'image/jpeg' });
+    if (error) return note(msg, error.message, true);
+    added.push(path);
   }
+  const old = e.path;
+  if (drop) patch.path = null;
+  if ((drop || !old) && added.length) patch.path = added.shift();   // the first fills this entry
   const { error } = await sb.from('log_entries').update(patch).eq('id', e.id);
   if (error) return note(msg, error.message, true);
-  if (patch.path) {
-    if (old) await sb.storage.from('logs').remove([old]);      // only once the row points elsewhere
-    const { data } = await sb.storage.from('logs').createSignedUrls([patch.path], 3600);
-    if (data?.[0]) logUrls[patch.path] = data[0].signedUrl;
+  if (drop && old) await sb.storage.from('logs').remove([old]);
+
+  // Anything still in hand joins the same step, run and description as its own
+  // entry, so each picture stays separately editable and deletable.
+  let extra = [];
+  if (added.length) {
+    const { data, error: err } = await sb.from('log_entries').insert(added.map(path => ({
+      list_id: e.list_id, owner: user.id, run_id: e.run_id, step, step_text: patch.step_text,
+      note: patch.note, path, created_at: e.created_at,
+    }))).select();
+    if (err) return note(msg, err.message, true);
+    extra = data;
+  }
+  const fresh = [patch.path, ...extra.map(x => x.path)].filter(Boolean);
+  if (fresh.length) {
+    const { data } = await sb.storage.from('logs').createSignedUrls(fresh, 3600);
+    for (const s of data ?? []) logUrls[s.path] = s.signedUrl;
   }
   Object.assign(e, patch);                  // patch in place so the filters and search survive
+  logRows.push(...extra);
   renderEntries();
 }
 // Two stages on purpose: a log is a record, so "delete" only marks it. The entry

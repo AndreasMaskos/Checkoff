@@ -51,7 +51,7 @@ signup confirmations bounce to Supabase's default `localhost:3000` unless
 | `index.html` | The entire app — markup, design, voice, timers, undo, sync, sharing, auth, photo log |
 | `config.js` | Supabase URL + publishable key. Empty = sync off, everything else still works |
 | `manifest.json` | PWA metadata (installable, standalone, portrait) |
-| `sw.js` | Service worker, stale-while-revalidate app shell cache |
+| `sw.js` | Service worker: the page is network-first, the rest stale-while-revalidate |
 | `icon.svg`, `icon-192.png`, `icon-512.png` | App icons (192/512 generated from the SVG with `qlmanage` + `sips`) |
 | `supabase/migrations/*.sql` | Schema, in order. Source of truth for the database |
 | `supabase/config.toml` | Marks the directory for the Supabase GitHub integration |
@@ -152,11 +152,15 @@ log_entries: { id, list_id, owner, step, step_text, note, path, created_at, dele
 **Entries are editable.** A dictated description comes out wrong, a picture gets
 taken one step late, a better one is shot afterwards — **Edit** on your own entry
 changes the description, which step it belongs to (a dropdown of the checklist's
-current steps, with `step_text` re-snapshotted from the one picked), and the
-picture or clip itself. A replacement is uploaded first and the old file removed
-only once the row points at the new one, so a failed upload cannot leave an entry
-pointing at nothing. Online only: an edit is a correction, not a capture, so it
-does not go through the offline queue.
+current steps, with `step_text` re-snapshotted from the one picked), and the files
+themselves: tick to delete this picture, pick any number to add. The first
+addition fills the entry if it has none; the rest become their own entries sharing
+the step, run, description and timestamp, so each stays separately editable.
+Additions upload before the row moves and the dropped file is deleted last, so a
+row never points at a file that is not there. Deleting the only picture of an
+entry with no description is refused — that is deleting the entry, and there is a
+button for that. Online only: an edit is a correction, not a capture, so it does
+not go through the offline queue.
 
 **Deleting is two stages, because a log is a record.** "Delete" only sets
 `deleted_at`: the entry stays in the log, struck through and dated, and its
@@ -354,6 +358,10 @@ interaction: challenge, response, next item.
   Naming them by uploader would have split a shared checklist's log into private
   piles and made the policy disagree with the table's.
 - **`SampleLists/` is gitignored.** The repo is public; those are lab screenshots.
+- **The page is network-first in the service worker.** Stale-while-revalidate
+  served the *previous* deploy on every first load, which reads as "my change is
+  not there" and wastes a debugging session. The cached copy is still the offline
+  fallback; only the freshness order changed.
 - Icons were generated on macOS with `qlmanage -t -s 512` then `sips -z 192 192`
   — no design tool needed to regenerate them from `icon.svg`.
 
