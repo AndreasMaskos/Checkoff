@@ -142,15 +142,17 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
 /* Files logged together sit side by side. Each is a thumbnail until clicked; the
    overlay takes that first tap so a small clip expands instead of hitting play. */
 .entry .mediaRow { display: grid; gap: .5rem; margin-bottom: .75rem;
-                   grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr)); }
-.entry .media { position: relative; }
+                   grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); }  /* wide enough for the buttons */
 .entry .media.big { grid-column: 1 / -1; }
-.entry .media:not(.big)::after { content: ''; position: absolute; inset: 0; cursor: zoom-in; }
+.entry .shot { position: relative; }
+.entry .media:not(.big) .shot::after { content: ''; position: absolute; inset: 0; cursor: zoom-in; }
 .entry .media:not(.big) :is(img, video) { aspect-ratio: 1; object-fit: cover; }   /* a tidy row, not a ragged one */
 .entry .media.big img { cursor: zoom-out; }
 .entry .media.gone :is(img, video) { opacity: .4; }
-.entry .media .acts { display: none; }
-.entry .media.big .acts { display: flex; margin-top: .4rem; }
+/* The buttons live under their own thumbnail and stay visible — hiding them
+   until the picture was expanded meant nobody found Edit. */
+.entry .media .acts { gap: .25rem; margin-top: .35rem; }
+.entry .media .acts .btn { font-size: .6875rem; padding: .35rem .45rem; }
 .entry { border-bottom: 1px solid var(--line); padding: 1rem 0; }
 .entry .meta { display: flex; gap: .75rem; font-size: .6875rem; letter-spacing: .1em;
                text-transform: uppercase; color: var(--dim); margin-bottom: .5rem; }
@@ -762,7 +764,7 @@ let logList = null, logRows = [], logUrls = {};
 // One handler for every entry: expanded video keeps its controls, so only a
 // picture collapses again on click.
 $('logBody').onclick = e => {
-  const m = e.target.closest('.media');
+  const m = e.target.closest('.shot')?.closest('.media');   // clicks on the buttons below are not zooms
   if (m && (!m.classList.contains('big') || e.target.tagName === 'IMG')) m.classList.toggle('big');
 };
 for (const id of ['logSearch', 'logFrom', 'logTo', 'logSort']) $(id).oninput = () => renderEntries();
@@ -863,9 +865,9 @@ function groupCard(items) {
 // the cell is a thumbnail and the overlay swallows the tap.
 function mediaCell(e) {
   const url = logUrls[e.path];
-  const cell = make('div', { className: e.deleted_at ? 'media gone' : 'media', innerHTML: isClip(e.path)
+  const cell = make('div', { className: e.deleted_at ? 'media gone' : 'media', innerHTML: '<div class="shot">' + (isClip(e.path)
     ? `<video src="${url}" controls playsinline preload="metadata"></video>`
-    : `<img src="${url}" alt="${esc(e.note || e.step_text)}" loading="lazy">` });
+    : `<img src="${url}" alt="${esc(e.note || e.step_text)}" loading="lazy">`) + '</div>' });
   if (e.owner === user.id) cell.append(actions(e, cell));
   return cell;
 }
