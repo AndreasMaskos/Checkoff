@@ -40,7 +40,9 @@ body {
 header {
   display: flex; align-items: center; gap: .75rem;
   padding: 1.25rem 0 .75rem; border-bottom: 1px solid var(--fg);
+  position: sticky; top: 0; background: var(--bg); z-index: 5;   /* Back stays reachable down a long log */
 }
+#backBtn { margin-left: -.4rem; }
 .wordmark { font: 800 1.0625rem/1 var(--sans); letter-spacing: -.02em; text-transform: uppercase; }
 .wordmark b { color: var(--go); }
 header .eyebrow { margin-left: auto; }
@@ -160,6 +162,7 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
 <div class="wrap">
 
 <header>
+  <button class="btn quiet hidden" id="backBtn" onclick="renderHome()">← Back</button>
   <span class="wordmark">Check<b>off</b></span>
   <span class="eyebrow" id="who"></span>
 </header>
@@ -274,7 +277,6 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
   </label>
   <div id="logBody"></div>
   <div class="row" style="margin-top:1.5rem">
-    <button class="btn quiet" onclick="renderHome()">← Back to my checklists</button>
     <button class="btn" id="logExport" onclick="exportLog()">Export HTML</button>
     <button class="btn" onclick="exportCsv()">Export CSV</button>
     <span class="spacer"></span>
@@ -287,7 +289,6 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
   <p class="eyebrow" style="padding-top:1.25rem">Run history</p>
   <h1 id="runsTitle" style="font:650 1.75rem/1.15 var(--sans);letter-spacing:-.03em;margin:.2rem 0 1.25rem"></h1>
   <div id="runsBody"></div>
-  <p style="margin-top:1.5rem"><button class="btn quiet" onclick="renderHome()">← Back to my checklists</button></p>
 </section>
 
 <!-- ============ account ============ -->
@@ -329,8 +330,6 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
   </div>
 
   <div class="row" style="margin-top:1.5rem">
-    <button class="btn quiet" onclick="renderHome()">← Back to my checklists</button>
-    <span class="spacer"></span>
     <button class="btn" onclick="signOut()">Sign out</button>
   </div>
 </section>
@@ -390,6 +389,9 @@ const offlineOK = () => !navigator.onLine && localStorage.lastUser;
 function show(id) {
   if (sb && !user && !offlineOK() && id !== 'auth') id = 'auth';   // otherwise signing in is not optional
   for (const s of document.querySelectorAll('section')) s.classList.toggle('hidden', s.id !== id);
+  // Every page but home gets Back in the masthead. The runner is left out: it has
+  // Exit, which also banks the run, and one stray tap there is expensive.
+  $('backBtn').classList.toggle('hidden', ['home', 'runner', 'auth'].includes(id));
   screen = id;
   scrollTo(0, 0);
 }
