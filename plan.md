@@ -135,8 +135,14 @@ made are unaffected.
 ## Photo log
 
 Evidence of what actually happened, kept per step. On any step of a run,
-**Photo/video** opens the camera or library; a picture is downscaled in the
-browser to 1600 px JPEG, a clip goes up as it was shot. Either is shown with an
+**Add file** opens the camera, the library or the files app and takes anything —
+pictures, clips, a protocol PDF, a spreadsheet of measurements. A picture is
+downscaled in the browser to 1600 px JPEG; a clip goes up as it was shot and a
+document untouched, because those are bytes we have no business rewriting.
+`kindOf()` decides video/image/file from the extension, and documents keep their
+original name in `filename` — a picture is identified by looking at it, a PDF by
+being called `Anesthesia_protocol_v3.pdf`, and the stored object is a uuid. In
+the log a document is a named link that opens in a new tab. Either is shown with an
 optional description before saving. **Several files can be picked at once** — one
 step often needs the PSLAX, the four-chamber and the doppler trace — and they
 share the one description while each becomes its own entry, so any of them can be
