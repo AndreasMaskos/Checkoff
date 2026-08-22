@@ -136,6 +136,10 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
 #shotPreview :is(img, video), .entry :is(img, video) {
   display: block; width: 100%; border-radius: 5px; background: var(--bg);
 }
+.doc { display: block; padding: .7rem .8rem; border: 1px solid var(--line); border-radius: 5px;
+       background: var(--panel); color: var(--fg); font-family: var(--mono); font-size: .75rem;
+       overflow-wrap: anywhere; text-decoration: none; }
+a.doc:hover { border-color: var(--fg); }
 /* auto-fit, so one file fills the width and four sit as a strip of thumbnails */
 #shotPreview { display: grid; gap: .5rem; margin-bottom: .75rem;
                grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr)); }
@@ -245,9 +249,9 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
     <div class="row">
       <button class="btn go" onclick="mark(true)">Done</button>
       <button class="btn" onclick="mark(false)">Skip</button>
-      <button class="btn" onclick="$('shot').click()">Photo/video</button>
+      <button class="btn" onclick="$('shot').click()">Add file</button>
       <button class="btn" onclick="newNote()">Note</button>
-      <input id="shot" class="hidden" type="file" accept="image/*,video/*" multiple>
+      <input id="shot" class="hidden" type="file" multiple>
       <button class="btn" onclick="move(-1)">Back</button>
       <button class="btn" onclick="undo()">Undo</button>
       <button class="btn quiet" onclick="quit()">Exit</button>
@@ -597,9 +601,12 @@ let pending = null;
 const MAX = 50 * 1024 * 1024;                 // our own cap, matching Supabase's free-tier per-object limit
 const fit = (w, h, max = 1600) => { const s = Math.min(1, max / Math.max(w, h)); return [Math.round(w * s), Math.round(h * s)]; };
 const stamp = iso => new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
-// Videos are told apart by the file extension on the way back down — cheaper than a mime column.
+// What a stored object is, told from its extension on the way back down —
+// cheaper than a mime column, and the extension is already in the path.
 const extOf = (name, type) => (name.match(/\.[a-z0-9]+$/i)?.[0] || '.' + ((type || '').split('/')[1] || 'bin')).toLowerCase();
-const isClip = path => /\.(mp4|mov|m4v|webm|avi|3gp)$/i.test(path || '');
+const kindOf = path => /\.(mp4|mov|m4v|webm|avi|3gp)$/i.test(path || '') ? 'video'
+                     : /\.(jpe?g|png|gif|webp|heic|heif|avif|bmp|tiff?)$/i.test(path || '') ? 'image'
+                     : 'file';                    // a PDF, a spreadsheet, an instrument's own format
 const oversize = b => `That file is ${Math.round(b.size / 1e6)} MB. Keep it under 50 MB — record a shorter clip.`;
 
 async function shrink(file) {                 // phone photos are 4 MB; 1600px of JPEG is plenty for a log
@@ -616,9 +623,10 @@ const atStep = () => ({ list: run.id, run: run.runId, step: run.at,
 function openShotPanel() {
   const n = pending.items.length;
   $('shotStep').textContent = (n > 1 ? `${n} files · ` : '') + pending.text;
-  $('shotPreview').replaceChildren(...pending.items.map(it => it.clip
-    ? make('video', { src: it.url, controls: true, playsInline: true, preload: 'metadata' })
-    : make('img', { src: it.url, alt: 'About to be logged' })));
+  $('shotPreview').replaceChildren(...pending.items.map(it =>
+    it.kind === 'video' ? make('video', { src: it.url, controls: true, playsInline: true, preload: 'metadata' })
+    : it.kind === 'image' ? make('img', { src: it.url, alt: 'About to be logged' })
+    : make('div', { className: 'doc', textContent: it.name })));
   $('shotNote').value = '';
   $('shotPanel').classList.remove('hidden');
   $('shotNote').focus();
@@ -632,11 +640,15 @@ $('shot').onchange = async e => {
   if (!files.length || !run) return;
   const items = [];
   for (const file of files) {
-    const clip = (file.type || '').startsWith('video/');
-    const blob = clip ? file : await shrink(file);   // ponytail: no transcoding, a clip goes up as it was shot
-    items.push({ blob, clip, url: URL.createObjectURL(blob),
-                 ext: clip ? extOf(file.name, file.type) : '.jpg',
-                 type: clip ? file.type || 'video/mp4' : 'image/jpeg' });
+    // ponytail: only pictures are touched. A clip goes up as it was shot, and a
+    // document is bytes we have no business rewriting.
+    const kind = (file.type || '').startsWith('video/') ? 'video'
+               : (file.type || '').startsWith('image/') ? 'image' : 'file';
+    const blob = kind === 'image' ? await shrink(file) : file;
+    items.push({ blob, kind, name: file.name,
+                 url: kind === 'file' ? null : URL.createObjectURL(blob),
+                 ext: kind === 'image' ? '.jpg' : extOf(file.name, file.type),
+                 type: kind === 'image' ? 'image/jpeg' : file.type || 'application/octet-stream' });
   }
   pending = { ...atStep(), items };
   openShotPanel();
@@ -684,7 +696,7 @@ function dictate() {
 }
 function cancelShot() {
   dict?.stop();
-  for (const it of pending?.items ?? []) URL.revokeObjectURL(it.url);
+  for (const it of pending?.items ?? []) if (it.url) URL.revokeObjectURL(it.url);
   $('shotPreview').replaceChildren();
   $('shotPanel').classList.add('hidden');
   pending = null;
@@ -724,8 +736,8 @@ async function saveShot() {
   if (big) return note($('shotMsg'), oversize(big.blob), true);
   const at = new Date().toISOString();        // when it happened, not when it reached the server
   const shared = { list: pending.list, run: pending.run, step: pending.step, text: pending.text, note: text, at };
-  if (!pending.items.length) await queueUp({ ...shared, blob: null, ext: '', type: '' });
-  for (const it of pending.items) await queueUp({ ...shared, blob: it.blob, ext: it.ext, type: it.type });
+  if (!pending.items.length) await queueUp({ ...shared, blob: null, ext: '', type: '', name: null });
+  for (const it of pending.items) await queueUp({ ...shared, blob: it.blob, ext: it.ext, type: it.type, name: it.name });
   cancelShot();
   flushQueue();
 }
@@ -750,7 +762,7 @@ async function flushQueue() {
       }
       const { error } = await sb.from('log_entries').insert({
         id: item.id, list_id: item.list, owner: user.id, run_id: item.run, step: item.step,
-        step_text: item.text, note: item.note, path, created_at: item.at,
+        step_text: item.text, note: item.note, path, filename: item.name ?? null, created_at: item.at,
       });
       if (error && error.code !== '23505') break;      // 23505 = already inserted on an earlier try
       await idb('readwrite', s => s.delete(item.id));
@@ -789,6 +801,8 @@ const day = iso => { const d = new Date(iso); return `${d.getFullYear()}-${pad2(
 const listTitle = e => byId(e.list_id)?.title ?? 'Unknown checklist';
 // Enough of the run id to see at a glance which entries came from the same run.
 const runTag = e => (e.run_id || '').slice(0, 4);
+// Documents uploaded before `filename` existed fall back to the stored object name.
+const fileLabel = e => e.filename || e.path?.split('/').pop() || '';
 
 // id === null searches every log at once. ponytail: one fetch of all rows and one
 // signing call, filtered in the browser — rows are tiny. Move the filter into
@@ -865,10 +879,13 @@ function groupCard(items) {
 // Each file carries its own controls, revealed when it is expanded — collapsed,
 // the cell is a thumbnail and the overlay swallows the tap.
 function mediaCell(e) {
-  const url = logUrls[e.path];
-  const cell = make('div', { className: e.deleted_at ? 'media gone' : 'media', innerHTML: '<div class="shot">' + (isClip(e.path)
-    ? `<video src="${url}" controls playsinline preload="metadata"></video>`
-    : `<img src="${url}" alt="${esc(e.note || e.step_text)}" loading="lazy">`) + '</div>' });
+  const url = logUrls[e.path], kind = kindOf(e.path);
+  // A document has nothing to look at: it gets its name and opens in a new tab.
+  const inner = kind === 'video' ? `<video src="${url}" controls playsinline preload="metadata"></video>`
+    : kind === 'image' ? `<img src="${url}" alt="${esc(e.note || e.step_text)}" loading="lazy">`
+    : `<a class="doc" href="${url}" target="_blank" rel="noopener">${esc(fileLabel(e))}</a>`;
+  const cell = make('div', { className: e.deleted_at ? 'media gone' : 'media',
+                             innerHTML: kind === 'file' ? inner : `<div class="shot">${inner}</div>` });
   if (e.owner === user.id) cell.append(actions(e, cell));
   return cell;
 }
@@ -892,9 +909,9 @@ function editEntry(e, card) {
     <label><span class="eyebrow">Belongs to step</span><select class="edStep">${options}</select></label>` +
     (e.path ? `<label class="row" style="gap:.5rem;margin-bottom:1rem">
       <input type="checkbox" class="edDrop" style="width:auto">
-      <span class="note">Delete this ${isClip(e.path) ? 'clip' : 'picture'}</span></label>` : '') +
-    `<label><span class="eyebrow">${e.path ? 'Add more pictures or clips' : 'Add a picture or clip'}</span>
-      <input class="edFile" type="file" accept="image/*,video/*" multiple></label>` });
+      <span class="note">Delete this ${{ video: 'clip', image: 'picture', file: 'document' }[kindOf(e.path)]}</span></label>` : '') +
+    `<label><span class="eyebrow">${e.path ? 'Add more files' : 'Add a file'}</span>
+      <input class="edFile" type="file" multiple></label>` });
   form.append(make('div', { className: 'row' }, [
     button('Save', () => saveEntryEdit(e, form), 'btn go'),
     button('Cancel', () => renderEntries()),
@@ -918,19 +935,20 @@ async function saveEntryEdit(e, form) {
 
   const added = [];
   for (const file of files) {
-    const clip = (file.type || '').startsWith('video/');
-    const blob = clip ? file : await shrink(file);
+    const kind = (file.type || '').startsWith('video/') ? 'video'
+               : (file.type || '').startsWith('image/') ? 'image' : 'file';
+    const blob = kind === 'image' ? await shrink(file) : file;
     if (blob.size > MAX) return note(msg, oversize(blob), true);
     note(msg, `Uploading ${added.length + 1}/${files.length}…`);
-    const path = `${e.list_id}/${crypto.randomUUID()}${clip ? extOf(file.name, file.type) : '.jpg'}`;
-    const { error } = await sb.storage.from('logs')
-      .upload(path, blob, { contentType: clip ? file.type || 'video/mp4' : 'image/jpeg' });
+    const path = `${e.list_id}/${crypto.randomUUID()}${kind === 'image' ? '.jpg' : extOf(file.name, file.type)}`;
+    const { error } = await sb.storage.from('logs').upload(path, blob,
+      { contentType: kind === 'image' ? 'image/jpeg' : file.type || 'application/octet-stream' });
     if (error) return note(msg, error.message, true);
-    added.push(path);
+    added.push({ path, filename: file.name });
   }
   const old = e.path;
-  if (drop) patch.path = null;
-  if ((drop || !old) && added.length) patch.path = added.shift();   // the first fills this entry
+  if (drop) { patch.path = null; patch.filename = null; }
+  if ((drop || !old) && added.length) Object.assign(patch, added.shift());   // the first fills this entry
   const { error } = await sb.from('log_entries').update(patch).eq('id', e.id);
   if (error) return note(msg, error.message, true);
   if (drop && old) await sb.storage.from('logs').remove([old]);
@@ -939,9 +957,9 @@ async function saveEntryEdit(e, form) {
   // entry, so each picture stays separately editable and deletable.
   let extra = [];
   if (added.length) {
-    const { data, error: err } = await sb.from('log_entries').insert(added.map(path => ({
+    const { data, error: err } = await sb.from('log_entries').insert(added.map(a => ({
       list_id: e.list_id, owner: user.id, run_id: e.run_id, step, step_text: patch.step_text,
-      note: patch.note, path, created_at: e.created_at,
+      note: patch.note, path: a.path, filename: a.filename, created_at: e.created_at,
     }))).select();
     if (err) return note(msg, err.message, true);
     extra = data;
@@ -1001,9 +1019,9 @@ async function exportLog() {
       btn.textContent = `Preparing ${++done}/${rows.length}…`;
       const url = logUrls[e.path];
       if (!url) continue;
-      media.push(isClip(e.path)
-        ? `<p class="clip">Video ${esc(e.path.split('/').pop())} — not embedded, it stays in the app.</p>`
-        : `<img src="${await dataUrl(url)}" alt="${esc(head.note || head.step_text)}">`);
+      media.push(kindOf(e.path) === 'image'
+        ? `<img src="${await dataUrl(url)}" alt="${esc(head.note || head.step_text)}">`
+        : `<p class="clip">${kindOf(e.path) === 'video' ? 'Video' : 'File'} ${esc(fileLabel(e))} — not embedded, it stays in the app.</p>`);
     }
     cards.push(`<article${gone ? ' class="gone"' : ''}>
       <h2>${esc(listTitle(head))} · ${pad2(head.step + 1)} ${esc(head.step_text)}</h2>
@@ -1041,7 +1059,7 @@ function exportCsv() {
   const table = [['When', 'Timestamp', 'Checklist', 'Run', 'Step no', 'Step', 'Description', 'Media', 'File', 'Deleted'],
     ...rows.map(e => [stamp(e.created_at), e.created_at, listTitle(e), e.run_id ?? '',
                       e.step + 1, e.step_text, e.note,
-                      e.path ? (isClip(e.path) ? 'video' : 'photo') : '', e.path?.split('/').pop() ?? '',
+                      e.path ? { video: 'video', image: 'photo', file: 'document' }[kindOf(e.path)] : '', fileLabel(e),
                       e.deleted_at ? stamp(e.deleted_at) : ''])];
   // The BOM is what makes Excel read it as UTF-8 instead of mangling umlauts.
   const csv = '﻿' + table.map(r => r.map(csvCell).join(',')).join('\r\n');
@@ -1416,7 +1434,8 @@ if (location.hash === '#test') {
   eq(fit(800, 600), [800, 600]);                             // never upscale
   eq(extOf('IMG_0042.MOV', 'video/quicktime'), '.mov');       // extension wins, lowercased
   eq(extOf('clip', 'video/mp4'), '.mp4');                     // no extension: fall back to the mime type
-  eq([isClip('x/y.mov'), isClip('x/y.jpg')], [true, false]);  // and it round-trips on the way back down
+  eq(['x/y.mov', 'x/y.JPG', 'x/y.pdf', 'x/y.xlsx'].map(kindOf),
+     ['video', 'image', 'file', 'file']);                     // and it round-trips on the way back down
   eq(day(new Date(2026, 7, 5, 23, 30).toISOString()), '2026-08-05');   // late evening stays on its own day
   const ent = (t, step = 0) => ({ created_at: `2026-08-1${t}T09:00:00Z`, step });
   eq([ent(1), ent(3), ent(2)].sort(SORTS.new).map(e => e.created_at.slice(8, 10)), ['13', '12', '11']);
