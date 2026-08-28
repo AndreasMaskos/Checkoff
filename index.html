@@ -103,6 +103,15 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
 #stage.fresh #challenge, #stage.fresh #clock { animation: rise .28s ease-out; }
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
 #queue .line { cursor: pointer; opacity: .55; }
+/* Native <progress>, only recoloured. Both pseudo-elements are needed: WebKit
+   paints the bar with -webkit-progress-*, Firefox with -moz-progress-bar. */
+#useBar { width: 100%; height: .5rem; appearance: none; border: 0; display: block;
+          background: var(--line); border-radius: 999px; overflow: hidden; }
+#useBar::-webkit-progress-bar { background: var(--line); }
+#useBar::-webkit-progress-value { background: var(--go); transition: width .3s; }
+#useBar::-moz-progress-bar { background: var(--go); }
+#useBar.full::-webkit-progress-value { background: var(--over); }
+#useBar.full::-moz-progress-bar { background: var(--over); }
 
 /* --- action bar --- */
 #bar {
@@ -340,6 +349,12 @@ a.doc:hover { border-color: var(--fg); }
       <button class="btn go" onclick="changePassword()">Change password</button>
       <span class="note" id="passMsg"></span>
     </div>
+  </div>
+
+  <div class="panel">
+    <h2>Storage</h2>
+    <progress id="useBar" max="1000" value="0"></progress>
+    <p class="note" id="useMsg"></p>
   </div>
 
   <div class="row" style="margin-top:1.5rem">
@@ -1372,6 +1387,26 @@ function setMode(mode) {
     : 'Sign in to pull your checklists onto this device.';
 }
 /* --- account ------------------------------------------------------------- */
+// The free tier's cap. A paid plan changes this one number and nothing else.
+const QUOTA = 1024 ** 3;
+const size = b => b >= 1e9 ? `${(b / 1e9).toFixed(2)} GB` : `${Math.round(b / 1e6)} MB`;
+// Summed in the database, scoped by the same policy that governs downloads —
+// see the log_storage_used migration. Failure is not worth a scary message: the
+// bar is a convenience, and the dashboard is the real bill.
+async function storageUsed() {
+  const bar = $('useBar'), msg = $('useMsg');
+  bar.value = 0;
+  bar.classList.remove('full');
+  msg.textContent = 'Checking…';
+  const { data, error } = await sb.rpc('log_storage_used');
+  if (error) return note(msg, `Could not read storage usage — ${error.message}`, true);
+  const { bytes, files } = data?.[0] ?? { bytes: 0, files: 0 };
+  const pct = Math.min(100, bytes / QUOTA * 100);
+  bar.value = Math.round(pct * 10);            // max is 1000, so a tenth of a percent still moves it
+  bar.classList.toggle('full', pct >= 80);
+  note(msg, `${size(bytes)} of ${size(QUOTA)} used by ${files} log ${files === 1 ? 'file' : 'files'}` +
+    ` — ${pct < 0.1 && bytes ? 'under 0.1' : pct.toFixed(1)}%`, pct >= 80);
+}
 function showAccount() {
   $('acctWho').textContent = user?.email ?? '';
   // document.lastModified is the served page's Last-Modified — the deploy you are
@@ -1382,6 +1417,7 @@ function showAccount() {
   note($('emailMsg'), '');
   note($('passMsg'), '');
   show('account');
+  storageUsed();                              // after show(), so the panel is measurable while it loads
 }
 async function changeEmail() {
   const email = $('newEmail').value.trim();

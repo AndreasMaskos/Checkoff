@@ -33,6 +33,7 @@ Last updated 2026-08-18.
 | 12 | Log keeps deleted entries until permanently deleted | done, live |
 | 13 | Log search, date range and sort order, per checklist and across every log | done, live |
 | 19 | Log opens on the last week, Load another month reaches further back | done, live |
+| 20 | Storage bar on the Account page — bytes used against the free tier's 1 GB | done, live |
 | 14 | Purge of a deleted checklist and its log | done, live |
 | 15 | Export of the filtered log — standalone HTML or CSV | done, live |
 | 16 | Offline upload queue, run ids, notes without a picture | done, live |
@@ -197,6 +198,15 @@ per tap, hiding itself once nothing older exists. It is the same From filter, no
 pagination: every row was fetched already, so the button costs no request, and
 typing a date or hitting Clear overrides it. Revisit when a fetch of everything
 stops being free, which is the same threshold that moves search into PostgREST.
+
+The **Account page** shows storage used as a native `<progress>` bar against the
+free tier's 1 GB, red past 80%. The sum comes from `log_storage_used()`, a plain
+invoker-rights function over `storage.objects.metadata->>'size'` — the existing
+"log objects" policy scopes the select, so the total is filtered by the same rule
+that decides what you can download, with no `security definer` to keep in step.
+The quota is per project rather than per user, so on a project with more than one
+person this reads as your share and not the whole bill. `QUOTA` in `index.html`
+is the only thing to change on a paid plan.
 
 **Export** writes exactly what is on screen — same filters, same order — as one
 self-contained HTML file: pictures inlined as data URIs, so it opens anywhere,
