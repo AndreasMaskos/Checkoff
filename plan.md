@@ -376,6 +376,14 @@ interaction: challenge, response, next item.
 - **Migrations deploy on push to main** via the Supabase GitHub integration.
   Verified working. Always confirm against the live API afterwards
   (`curl $URL/rest/v1/lists?select=id -H "apikey: …"`) rather than trusting it.
+  Allow ~40–90s: a check run straight after the push reports the old schema.
+- **`grant execute … to authenticated` restricts nothing.** Supabase's default
+  privileges already grant execute on new `public` functions to `anon` *and*
+  `authenticated` by name, and Postgres adds its own grant to `PUBLIC`. A
+  function that should not answer signed-out callers needs `revoke execute …
+  from public` *and* `from anon`; revoking only `PUBLIC` leaves anon's own grant
+  untouched, which is exactly what `log_storage_used()` did for two commits.
+  Caught only because the live-API check above was actually run.
 - **Storage stays on Supabase** (decided 2026-08-19). Backblaze B2 is ~3.5× cheaper
   per GB, but it has never heard of our users: access control would move out of the
   Postgres policies into an Edge Function we maintain, and a presigned URL bypasses
