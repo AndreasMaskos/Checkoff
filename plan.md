@@ -199,6 +199,12 @@ pagination: every row was fetched already, so the button costs no request, and
 typing a date or hitting Clear overrides it. Revisit when a fetch of everything
 stops being free, which is the same threshold that moves search into PostgREST.
 
+The signed-in **address in the masthead is the way to the account page**, from
+any screen. It is a real `<button>` rather than a span with a click handler, so
+it focuses and answers Enter. It is inert on the runner for the same reason Back
+is hidden there — leaving that way would drop the run rather than bank it — and
+inert signed out, where "offline" is a state and not a destination.
+
 The **Account page** shows storage used as a native `<progress>` bar against the
 free tier's 1 GB, red past 80%. The sum comes from `log_storage_used()`, a plain
 invoker-rights function over `storage.objects.metadata->>'size'` — the existing

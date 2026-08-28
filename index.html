@@ -46,6 +46,12 @@ header {
 .wordmark { font: 800 1.0625rem/1 var(--sans); letter-spacing: -.02em; text-transform: uppercase; }
 .wordmark b { color: var(--go); }
 header .eyebrow { margin-left: auto; }
+/* The signed-in address doubles as the way to the account page, reachable from
+   any screen rather than only from home. .btn would otherwise win the font size
+   off .eyebrow, and a long address on a narrow phone would shove the wordmark. */
+header #who { font-size: .6875rem; letter-spacing: .12em; max-width: 45vw;
+              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+header #who:disabled { color: var(--dim); cursor: default; }
 
 /* --- controls --- */
 .btn {
@@ -185,7 +191,7 @@ a.doc:hover { border-color: var(--fg); }
 <header>
   <button class="btn quiet hidden" id="backBtn" onclick="renderHome()">← Back</button>
   <span class="wordmark">Check<b>off</b></span>
-  <span class="eyebrow" id="who"></span>
+  <button class="btn quiet eyebrow" id="who" onclick="showAccount()" title="Account"></button>
 </header>
 
 <!-- ============ home ============ -->
@@ -421,6 +427,10 @@ function show(id) {
   // Every page but home gets Back in the masthead. The runner is left out: it has
   // Exit, which also banks the run, and one stray tap there is expensive.
   $('backBtn').classList.toggle('hidden', ['home', 'runner', 'auth'].includes(id));
+  // The address beside it leads to the account page, so it is inert for the same
+  // reason on the runner — leaving that way would drop the run instead of
+  // banking it — and inert signed out, where there is no account to show.
+  $('who').disabled = !user || id === 'runner';
   screen = id;
   scrollTo(0, 0);
 }
@@ -460,7 +470,11 @@ function renderHome() {
   $('acctBtn').textContent = !sb ? '' : user ? 'Account' : 'Sign in to sync';
   $('acctBtn').classList.toggle('hidden', !sb);
   $('acctBtn').onclick = () => user ? showAccount() : showAuth('in');
-  $('who').textContent = user ? user.email : offlineOK() ? 'offline' : '';
+  // "offline" is a state, not a destination: it stays visible, show() keeps it
+  // inert. Empty means there is nothing to say, so it goes altogether.
+  const who = $('who');
+  who.textContent = user ? user.email : offlineOK() ? 'offline' : '';
+  who.classList.toggle('hidden', !who.textContent);
   show('home');
 }
 
