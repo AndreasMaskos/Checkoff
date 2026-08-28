@@ -21,7 +21,7 @@ const run = async items => {
   const sb = {
     from: () => ({
       upsert: async () => ({ error: null }),
-      insert: async row => ({ error: queue.find(i => i.id === row.id).fails ? bad : null }),
+        insert: async row => ({ error: queue.find(i => i.id === row.id).fails ? bad : null }),
     }),
     storage: { from: () => ({ upload: async () => ({ error: null }) }) },
   };
@@ -33,12 +33,14 @@ const run = async items => {
     flushErr: '',
   };
   const keys = Object.keys(scope);
-  const fn = new Function(...keys, `${code}\nreturn (async () => { await flushQueue(); return flushErr; })();`);
-  const err = await fn(...keys.map(k => scope[k]));
-  return { left: queue.map(i => i.id), err };
+  const fn = new Function(...keys, `${code}\nreturn (async () => { await flushQueue(); return [flushErr, dropped]; })();`);
+  const [err, gone] = await fn(...keys.map(k => scope[k]));
+  return { left: queue.map(i => i.id), err, gone };
 };
 
 const entry = (id, fails = false) => ({ id, kind: 'entry', fails, blob: null, list: 'l' });
+// The iOS failure: the File went into IndexedDB and came back with no bytes.
+const emptied = id => ({ id, kind: 'entry', blob: { size: 0 }, list: 'l', ext: '.mov' });
 
 // A bad item in the middle: the ones after it still go up, only it is left.
 let r = await run([entry('a'), entry('b', true), entry('c')]);
@@ -55,4 +57,10 @@ r = await run([entry('a', true), entry('b'), entry('c', true)]);
 assert.deepStrictEqual(r.left, ['a', 'c']);
 assert.match(r.err, /^2 stuck, first: /);
 
-console.log('ok — bad entries do not block the queue');
+// An entry whose bytes the browser lost can never upload: dropped, not retried
+// forever, and the good ones around it are untouched.
+r = await run([entry('a'), emptied('b'), entry('c'), emptied('d')]);
+assert.deepStrictEqual(r.left, [], `dead entries should not linger, got ${r.left}`);
+assert.strictEqual(r.gone, 2);
+
+console.log('ok — bad entries do not block the queue, dead ones are dropped');

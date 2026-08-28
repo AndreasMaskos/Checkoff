@@ -640,11 +640,15 @@ $('shot').onchange = async e => {
   if (!files.length || !run) return;
   const items = [];
   for (const file of files) {
-    // ponytail: only pictures are touched. A clip goes up as it was shot, and a
-    // document is bytes we have no business rewriting.
+    // ponytail: only pictures are re-encoded. A clip goes up as it was shot, and
+    // a document is bytes we have no business rewriting — but the bytes are read
+    // out now rather than queueing the File itself. Safari stores a File in
+    // IndexedDB as a reference to the camera's temp file, iOS reclaims that file,
+    // and the queue wakes up holding a zero-length blob the server refuses.
     const kind = (file.type || '').startsWith('video/') ? 'video'
                : (file.type || '').startsWith('image/') ? 'image' : 'file';
-    const blob = kind === 'image' ? await shrink(file) : file;
+    const blob = kind === 'image' ? await shrink(file)
+               : new Blob([await file.arrayBuffer()], { type: file.type });
     items.push({ blob, kind, name: file.name,
                  url: kind === 'file' ? null : URL.createObjectURL(blob),
                  ext: kind === 'image' ? '.jpg' : extOf(file.name, file.type),
@@ -729,7 +733,8 @@ let flushErr = '';
 async function queueBadge() {
   const n = (await queued().catch(() => [])).length;
   const why = !n ? '' : flushErr ? ` — ${flushErr}` : !navigator.onLine ? ' — offline' : '';
-  const text = n ? `${n} waiting to upload${why}` : '';
+  const text = n ? `${n} waiting to upload${why}`
+    : dropped ? `${dropped} capture${dropped > 1 ? 's' : ''} dropped — the browser lost the file` : '';
   for (const id of ['queued', 'queuedHome']) $(id).textContent = text;
 }
 async function saveShot() {
@@ -753,6 +758,9 @@ async function pushItem(item) {
   }
   let path = null;
   if (item.blob) {
+    // Nothing to send, and no later flush can change that: the bytes went away
+    // under us. Says so plainly instead of "No content provided" from the server.
+    if (!item.blob.size) return { message: 'file lost by the browser before it uploaded', dead: true };
     path = `${item.list}/${item.id}${item.ext}`;
     const { error } = await sb.storage.from('logs')
       .upload(path, item.blob, { contentType: item.type, upsert: true });
@@ -764,7 +772,7 @@ async function pushItem(item) {
   });
   return error?.code === '23505' ? null : error;    // 23505 = already inserted on an earlier try
 }
-let flushing = false;
+let flushing = false, dropped = 0;              // dropped survives until reload, so the count is seen
 async function flushQueue() {
   if (flushing || !sb || !user) return;
   flushing = true;
@@ -773,7 +781,14 @@ async function flushQueue() {
     flushErr = '';
     for (const item of await queued()) {
       const error = await pushItem(item);
-      if (!error) { await idb('readwrite', s => s.delete(item.id)); continue; }
+      // Dead means no flush will ever succeed — the file is gone. Keeping it
+      // would nag about the queue forever, so it goes, counted rather than
+      // silent. What it recorded is lost with it.
+      if (!error || error.dead) {
+        await idb('readwrite', s => s.delete(item.id));
+        if (error) dropped++;
+        continue;
+      }
       // A dead network fails every item identically, so stop and keep the lot.
       // Anything else is this item's own problem — a clip the bucket refuses, a
       // full quota — and the entries behind it still deserve their try.
@@ -782,8 +797,8 @@ async function flushQueue() {
       flushErr ||= error.message;
     }
   } catch { /* IndexedDB unavailable (private mode): nothing to flush */ }
-  // ponytail: a permanently bad item is retried on every flush, blob and all.
-  // Give it a try counter and a way to drop it if that turns into real traffic.
+  // ponytail: a live item the server keeps refusing is still retried in full on
+  // every flush. Give it a try counter if that turns into real traffic.
   if (stuck > 1) flushErr = `${stuck} stuck, first: ${flushErr}`;
   flushing = false;
   queueBadge();

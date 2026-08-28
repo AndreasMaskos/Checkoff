@@ -390,6 +390,12 @@ interaction: challenge, response, next item.
   upload, but it is retried in full — blob and all — on every flush. No try
   counter and no way to drop it by hand. The badge names the first error and
   counts how many are stuck; being offline stops the flush and keeps the lot.
+- A capture is read into memory at pick time, not queued as the `File`. Safari
+  stores a File in IndexedDB as a reference to the camera's temp file, iOS
+  reclaims it, and the queue is left holding zero bytes — which is what stranded
+  eleven clips before 2026-08-28. A queued item that still reads back empty is
+  dropped on the next flush and counted in the badge, since no retry can fix it.
+  The cost is that a 50 MB clip is held in memory while it is being described.
 - Queued captures are on **that device only** until they upload — a second phone
   cannot see them, and clearing site data drops them.
 - An iPhone records `.mov`/HEVC. Safari plays it back fine; a Windows Chrome
