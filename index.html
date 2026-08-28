@@ -723,9 +723,13 @@ const queued = () => idb('readonly', s => s.getAll());
 // copy instead of stacking two. Captures get a fresh one each time.
 const queueUp = item => idb('readwrite', s => s.put({ id: item.row?.id ?? crypto.randomUUID(), kind: 'entry', ...item }))
   .then(queueBadge).catch(() => {});
+// The reason the queue is stuck, if it is. Without it "3 waiting to upload"
+// sits there forever and nobody can tell offline from a full storage bucket.
+let flushErr = '';
 async function queueBadge() {
   const n = (await queued().catch(() => [])).length;
-  const text = n ? `${n} waiting to upload` : '';
+  const why = !n ? '' : flushErr ? ` — ${flushErr}` : !navigator.onLine ? ' — offline' : '';
+  const text = n ? `${n} waiting to upload${why}` : '';
   for (const id of ['queued', 'queuedHome']) $(id).textContent = text;
 }
 async function saveShot() {
@@ -741,33 +745,46 @@ async function saveShot() {
   cancelShot();
   flushQueue();
 }
+// One item's trip to the server. Returns null on success, the error otherwise.
+async function pushItem(item) {
+  if (item.kind === 'run') {
+    const { error } = await sb.from('runs').upsert({ ...item.row, owner: user.id });
+    return error;
+  }
+  let path = null;
+  if (item.blob) {
+    path = `${item.list}/${item.id}${item.ext}`;
+    const { error } = await sb.storage.from('logs')
+      .upload(path, item.blob, { contentType: item.type, upsert: true });
+    if (error) return error;
+  }
+  const { error } = await sb.from('log_entries').insert({
+    id: item.id, list_id: item.list, owner: user.id, run_id: item.run, step: item.step,
+    step_text: item.text, note: item.note, path, filename: item.name ?? null, created_at: item.at,
+  });
+  return error?.code === '23505' ? null : error;    // 23505 = already inserted on an earlier try
+}
 let flushing = false;
 async function flushQueue() {
   if (flushing || !sb || !user) return;
   flushing = true;
+  let stuck = 0;
   try {
+    flushErr = '';
     for (const item of await queued()) {
-      if (item.kind === 'run') {
-        const { error } = await sb.from('runs').upsert({ ...item.row, owner: user.id });
-        if (error) break;
-        await idb('readwrite', s => s.delete(item.id));
-        continue;
-      }
-      let path = null;
-      if (item.blob) {
-        path = `${item.list}/${item.id}${item.ext}`;
-        const { error } = await sb.storage.from('logs')
-          .upload(path, item.blob, { contentType: item.type, upsert: true });
-        if (error) break;                     // offline, or storage is down: keep the lot for later
-      }
-      const { error } = await sb.from('log_entries').insert({
-        id: item.id, list_id: item.list, owner: user.id, run_id: item.run, step: item.step,
-        step_text: item.text, note: item.note, path, filename: item.name ?? null, created_at: item.at,
-      });
-      if (error && error.code !== '23505') break;      // 23505 = already inserted on an earlier try
-      await idb('readwrite', s => s.delete(item.id));
+      const error = await pushItem(item);
+      if (!error) { await idb('readwrite', s => s.delete(item.id)); continue; }
+      // A dead network fails every item identically, so stop and keep the lot.
+      // Anything else is this item's own problem — a clip the bucket refuses, a
+      // full quota — and the entries behind it still deserve their try.
+      if (!navigator.onLine) break;
+      stuck++;
+      flushErr ||= error.message;
     }
   } catch { /* IndexedDB unavailable (private mode): nothing to flush */ }
+  // ponytail: a permanently bad item is retried on every flush, blob and all.
+  // Give it a try counter and a way to drop it if that turns into real traffic.
+  if (stuck > 1) flushErr = `${stuck} stuck, first: ${flushErr}`;
   flushing = false;
   queueBadge();
 }

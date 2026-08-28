@@ -386,8 +386,10 @@ interaction: challenge, response, next item.
   exports, the timings do not.
 - Run history has no subject/animal id: a run is identified by its start time and
   a four-character tag, not by what it was performed on.
-- The queue retries in order and stops at the first failure, so one wedged item
-  blocks the rest. No per-item error surfacing beyond the "n waiting" count.
+- A queued item the server permanently refuses is skipped so the rest still
+  upload, but it is retried in full — blob and all — on every flush. No try
+  counter and no way to drop it by hand. The badge names the first error and
+  counts how many are stuck; being offline stops the flush and keeps the lot.
 - Queued captures are on **that device only** until they upload — a second phone
   cannot see them, and clearing site data drops them.
 - An iPhone records `.mov`/HEVC. Safari plays it back fine; a Windows Chrome
