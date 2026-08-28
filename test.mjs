@@ -1,7 +1,8 @@
-// The one thing worth a test in the upload queue: a single bad entry must not
-// hold up the good ones behind it. Runs the real source out of index.html —
+// The two bits of index.html with edge cases worth pinning: the upload queue
+// (one bad entry must not hold up the good ones) and the log's month-at-a-time
+// window (calendar arithmetic lies). Runs the real source out of index.html —
 // no build step, no framework, in keeping with the rest of the project.
-//   node test-queue.mjs
+//   node test.mjs
 import { readFileSync } from 'node:fs';
 import assert from 'node:assert';
 
@@ -64,3 +65,22 @@ assert.deepStrictEqual(r.left, [], `dead entries should not linger, got ${r.left
 assert.strictEqual(r.gone, 2);
 
 console.log('ok — bad entries do not block the queue, dead ones are dropped');
+
+// --- how far back the log reaches ---
+const dates = new Function('pad2', cut('const day = iso =>', 'const listTitle') +
+  'return { day, fromDay, monthBack, daysAgo };')(n => String(n).padStart(2, '0'));
+const back = s => dates.day(dates.monthBack(dates.fromDay(s)));
+
+assert.strictEqual(back('2026-08-21'), '2026-07-21');
+// The one that bites: 31 March minus a month is not 3 March.
+assert.strictEqual(back('2026-03-31'), '2026-02-28');
+assert.strictEqual(back('2024-03-31'), '2024-02-29');       // and a leap year
+assert.strictEqual(back('2026-01-15'), '2025-12-15');       // across the year
+// Repeated taps keep walking backwards, never forwards.
+let d = '2026-08-28';
+for (let i = 0; i < 24; i++) { const prev = d; d = back(d); assert.ok(d < prev, `${prev} -> ${d}`); }
+assert.strictEqual(d, '2024-08-28');
+// A week back is a week back, in local time.
+assert.strictEqual(dates.daysAgo(0), dates.day(new Date()));
+
+console.log('ok — the log window walks back a real calendar month');

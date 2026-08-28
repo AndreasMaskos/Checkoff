@@ -32,6 +32,7 @@ Last updated 2026-08-18.
 | 11 | Photo log — picture or clip + description per step, timestamped | done, live |
 | 12 | Log keeps deleted entries until permanently deleted | done, live |
 | 13 | Log search, date range and sort order, per checklist and across every log | done, live |
+| 19 | Log opens on the last week, Load another month reaches further back | done, live |
 | 14 | Purge of a deleted checklist and its log | done, live |
 | 15 | Export of the filtered log — standalone HTML or CSV | done, live |
 | 16 | Offline upload queue, run ids, notes without a picture | done, live |
@@ -189,6 +190,13 @@ inclusive, either end optional), all client-side over the rows already fetched.
 Dates compare on the reader's local day, so a picture taken at 23:30 belongs to
 that evening rather than to the next UTC one. Deleting patches those rows in
 place instead of refetching, so the filters survive it.
+
+The log **opens on the last seven days** — the question is nearly always "what
+happened today" — and **Load another month** walks *From* back one calendar month
+per tap, hiding itself once nothing older exists. It is the same From filter, not
+pagination: every row was fetched already, so the button costs no request, and
+typing a date or hitting Clear overrides it. Revisit when a fetch of everything
+stops being free, which is the same threshold that moves search into PostgREST.
 
 **Export** writes exactly what is on screen — same filters, same order — as one
 self-contained HTML file: pictures inlined as data URIs, so it opens anywhere,

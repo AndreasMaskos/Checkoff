@@ -288,6 +288,7 @@ a.doc:hover { border-color: var(--fg); }
     </select>
   </label>
   <div id="logBody"></div>
+  <button class="btn quiet hidden" id="logMore" style="margin-top:1rem">Load another month</button>
   <div class="row" style="margin-top:1.5rem">
     <button class="btn" id="logExport" onclick="exportLog()">Export HTML</button>
     <button class="btn" onclick="exportCsv()">Export CSV</button>
@@ -829,6 +830,18 @@ const SORTS = {
 // An entry's day in the reader's own timezone — a picture taken at 23:30 belongs
 // to that evening, not to the next UTC day.
 const day = iso => { const d = new Date(iso); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
+/* --- how far back the log reaches ---------------------------------------
+   It opens on the last week, because the question is nearly always "what
+   happened today", and reaches back a month per tap. Every row is already
+   fetched, so this only moves the From filter — typing a date by hand or
+   hitting Clear still overrides it. */
+const daysAgo = n => { const d = new Date(); d.setDate(d.getDate() - n); return day(d); };
+// Parsed as local, not the UTC that `new Date('2026-08-21')` would give: an
+// hour's drift either way would move the window across a day boundary.
+const fromDay = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+// setMonth alone turns 31 March into 3 March — a month back that lands *later*
+// and hides entries. setDate(0) walks that overshoot back to the month's end.
+const monthBack = d => { const n = new Date(d); n.setMonth(n.getMonth() - 1); if (n.getDate() !== d.getDate()) n.setDate(0); return n; };
 
 const listTitle = e => byId(e.list_id)?.title ?? 'Unknown checklist';
 // Enough of the run id to see at a glance which entries came from the same run.
@@ -843,7 +856,8 @@ async function showLog(id) {
   const l = id === null ? null : byId(id);
   logList = id; logRows = []; logUrls = {};
   $('logTitle').textContent = l ? l.title : 'All logs';
-  for (const f of ['logSearch', 'logFrom', 'logTo']) $(f).value = '';
+  for (const f of ['logSearch', 'logTo']) $(f).value = '';
+  $('logFrom').value = daysAgo(7);
   $('logPurge').classList.toggle('hidden', !(l?.deleted && mine(l)));
   $('logPurge').onclick = () => purgeList(id);
   $('logBody').innerHTML = '<p class="note">Loading…</p>';
@@ -869,8 +883,16 @@ function shownEntries() {
     (!from || day(e.created_at) >= from) && (!to || day(e.created_at) <= to))
     .sort(SORTS[$('logSort').value]);
 }
+$('logMore').onclick = () => {
+  $('logFrom').value = day(monthBack(fromDay($('logFrom').value || daysAgo(7))));
+  renderEntries();
+};
 function renderEntries() {
   const rows = shownEntries();
+  // Nothing older than the window means nothing left to load. Sits outside the
+  // empty-log early returns below, or an empty week would hide the way out of it.
+  const from = $('logFrom').value;
+  $('logMore').classList.toggle('hidden', !(from && logRows.some(e => day(e.created_at) < from)));
   if (!rows.length) return $('logBody').innerHTML = logRows.length
     ? '<p class="note">Nothing matches those filters.</p>'
     : `<p class="note">${logList === null ? 'No logs yet.' : 'Nothing logged yet.'} ` +
