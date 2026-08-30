@@ -3,7 +3,9 @@
 // window (calendar arithmetic lies). Runs the real source out of index.html —
 // no build step, no framework, in keeping with the rest of the project.
 //   node test.mjs
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import assert from 'node:assert';
 
 const src = readFileSync(new URL('index.html', import.meta.url), 'utf8');
@@ -34,9 +36,9 @@ const run = async items => {
     flushErr: '',
   };
   const keys = Object.keys(scope);
-  const fn = new Function(...keys, `${code}\nreturn (async () => { await flushQueue(); return [flushErr, dropped]; })();`);
-  const [err, gone] = await fn(...keys.map(k => scope[k]));
-  return { left: queue.map(i => i.id), err, gone };
+  const fn = new Function(...keys, `${code}\nreturn (async () => { await flushQueue(); return [flushErr, dropped, stuckIds]; })();`);
+  const [err, gone, stuck] = await fn(...keys.map(k => scope[k]));
+  return { left: queue.map(i => i.id), err, gone, stuck };
 };
 
 const entry = (id, fails = false) => ({ id, kind: 'entry', fails, blob: null, list: 'l' });
@@ -47,15 +49,20 @@ const emptied = id => ({ id, kind: 'entry', blob: { size: 0 }, list: 'l', ext: '
 let r = await run([entry('a'), entry('b', true), entry('c')]);
 assert.deepStrictEqual(r.left, ['b'], `expected only b stuck, got ${r.left}`);
 assert.match(r.err, /Payload too large/);
+// Discard offers exactly what failed, so a queue merely waiting out a dead
+// network can never be swept up with it.
+assert.deepStrictEqual(r.stuck, ['b']);
 
 // Everything good: the queue empties and the badge has nothing to say.
 r = await run([entry('a'), entry('b')]);
 assert.deepStrictEqual(r.left, []);
+assert.deepStrictEqual(r.stuck, []);
 assert.strictEqual(r.err, '');
 
 // Two bad ones: both kept, the badge counts them.
 r = await run([entry('a', true), entry('b'), entry('c', true)]);
 assert.deepStrictEqual(r.left, ['a', 'c']);
+assert.deepStrictEqual(r.stuck, ['a', 'c']);
 assert.match(r.err, /^2 stuck, first: /);
 
 // An entry whose bytes the browser lost can never upload: dropped, not retried
@@ -84,3 +91,18 @@ assert.strictEqual(d, '2024-08-28');
 assert.strictEqual(dates.daysAgo(0), dates.day(new Date()));
 
 console.log('ok — the log window walks back a real calendar month');
+
+// --- the page still parses ---
+// index.html is edited by hand and by script, and a dropped character in the
+// middle of it is a blank app rather than a failing feature. Cheapest possible
+// guard: hand the page's module to node and see if it is still JavaScript.
+const js = src.slice(src.indexOf('<script type="module">') + '<script type="module">'.length,
+                     src.lastIndexOf('</script>'));
+const tmp = new URL('./.parse-check.mjs', import.meta.url);
+writeFileSync(tmp, js.replace(/^\s*import .*$/m, ''));      // config.js is not on this side
+try {
+  execFileSync(process.execPath, ['--check', fileURLToPath(tmp)], { stdio: 'pipe' });
+} finally {
+  unlinkSync(tmp);
+}
+console.log('ok — the page script parses');

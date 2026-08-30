@@ -34,6 +34,7 @@ Last updated 2026-08-18.
 | 13 | Log search, date range and sort order, per checklist and across every log | done, live |
 | 19 | Log opens on the last week, Load another month reaches further back | done, live |
 | 20 | Storage bar on the Account page — bytes used against the free tier's 1 GB | done, live |
+| 21 | Descriptions grow to fit; stuck uploads can be discarded from home | done, live |
 | 14 | Purge of a deleted checklist and its log | done, live |
 | 15 | Export of the filtered log — standalone HTML or CSV | done, live |
 | 16 | Offline upload queue, run ids, notes without a picture | done, live |
@@ -198,6 +199,22 @@ per tap, hiding itself once nothing older exists. It is the same From filter, no
 pagination: every row was fetched already, so the button costs no request, and
 typing a date or hitting Clear overrides it. Revisit when a fetch of everything
 stops being free, which is the same threshold that moves search into PostgREST.
+
+A **description field grows with what is in it** — capture and correction alike
+— up to 40vh, past which it scrolls. They were single-line `<input>`s, so a
+dictated sentence scrolled all but its tail out of sight, which is the one place
+you cannot proofread by hand. One delegated `input` listener covers the field the
+entry editor builds later; setting `.value` in code fires no such event, so
+dictation and both openers call `grow()` themselves. A hidden field measures
+zero, so the call comes after the panel is shown, never before.
+
+**Discard stuck uploads** appears on home when a flush rejects something for a
+reason retrying will not fix. It offers only what actually failed — a queue
+waiting out a dead network is never swept up with it — asks first, and says
+plainly that the description goes too, not only the file. Home only: the runner
+is no place for a destructive button, on the same reasoning that hides Back
+there. Nothing about it is automatic except the zero-byte case, which no retry
+could ever save.
 
 The signed-in **address in the masthead is the way to the account page**, from
 any screen. It is a real `<button>` rather than a span with a click handler, so

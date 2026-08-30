@@ -69,6 +69,10 @@ input, textarea, select {
   background: var(--panel); border: 1px solid var(--line); border-radius: 5px;
 }
 textarea { min-height: 13rem; font-family: var(--mono); font-size: .9375rem; line-height: 1.8; resize: vertical; }
+/* A description is a dictated sentence or three, and on one line all but the
+   tail of it is scrolled out of sight. These grow with what is in them, up to
+   the point where the panel would be nothing but textarea. */
+textarea.grow { min-height: 0; line-height: 1.6; max-height: 40vh; resize: none; overflow-y: auto; }
 label { display: block; margin-bottom: 1rem; }
 label .eyebrow { display: block; margin-bottom: .35rem; }
 .row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
@@ -204,6 +208,7 @@ a.doc:hover { border-color: var(--fg); }
     <button class="btn quiet" id="acctBtn"></button>
   </div>
   <p class="note" id="queuedHome"></p>
+  <button class="btn quiet hidden" id="dropStuck" onclick="discardStuck()"></button>
   <p class="note" id="support"></p>
 </section>
 
@@ -246,7 +251,7 @@ a.doc:hover { border-color: var(--fg); }
     <div id="shotPreview"></div>
     <label>
       <span class="eyebrow">Description — optional</span>
-      <input id="shotNote" placeholder="What this shows">
+      <textarea id="shotNote" class="grow" rows="2" placeholder="What this shows"></textarea>
     </label>
     <div class="row" style="margin:-.5rem 0 1rem">
       <button class="btn" id="dictBtn" onclick="dictate()">Dictate</button>
@@ -659,6 +664,7 @@ function openShotPanel() {
     : make('div', { className: 'doc', textContent: it.name })));
   $('shotNote').value = '';
   $('shotPanel').classList.remove('hidden');
+  grow($('shotNote'));                        // after the unhide: a hidden field measures 0
   $('shotNote').focus();
 }
 // One step often needs several pictures — PSLAX, four chamber, the doppler trace.
@@ -716,6 +722,7 @@ function dictate() {
   dict.onresult = e => {
     const heard = [...e.results].map(r => r[0].transcript).join(' ').replace(/\s+/g, ' ').trim();
     $('shotNote').value = before ? `${before} ${heard}` : heard;
+    grow($('shotNote'));                      // no input event fires for a value set in code
   };
   dict.onerror = e => note($('dictMsg'), e.error === 'not-allowed' ? 'Microphone blocked.' : e.error, true);
   dict.onend = () => {
@@ -764,8 +771,10 @@ async function queueBadge() {
   const n = (await queued().catch(() => [])).length;
   const why = !n ? '' : flushErr ? ` — ${flushErr}` : !navigator.onLine ? ' — offline' : '';
   const text = n ? `${n} waiting to upload${why}`
-    : dropped ? `${dropped} capture${dropped > 1 ? 's' : ''} dropped — the browser lost the file` : '';
+    : dropped ? `${dropped} capture${dropped > 1 ? 's' : ''} dropped` : '';
   for (const id of ['queued', 'queuedHome']) $(id).textContent = text;
+  $('dropStuck').textContent = `Discard ${stuckIds.length} stuck upload${stuckIds.length > 1 ? 's' : ''}`;
+  $('dropStuck').classList.toggle('hidden', !stuckIds.length);
 }
 async function saveShot() {
   if (!pending) return;
@@ -803,10 +812,11 @@ async function pushItem(item) {
   return error?.code === '23505' ? null : error;    // 23505 = already inserted on an earlier try
 }
 let flushing = false, dropped = 0;              // dropped survives until reload, so the count is seen
+let stuckIds = [];                             // what the last flush could not place, so it can be discarded
 async function flushQueue() {
   if (flushing || !sb || !user) return;
   flushing = true;
-  let stuck = 0;
+  const stuckNow = [];
   try {
     flushErr = '';
     for (const item of await queued()) {
@@ -823,14 +833,33 @@ async function flushQueue() {
       // Anything else is this item's own problem — a clip the bucket refuses, a
       // full quota — and the entries behind it still deserve their try.
       if (!navigator.onLine) break;
-      stuck++;
+      stuckNow.push(item.id);
       flushErr ||= error.message;
     }
   } catch { /* IndexedDB unavailable (private mode): nothing to flush */ }
   // ponytail: a live item the server keeps refusing is still retried in full on
   // every flush. Give it a try counter if that turns into real traffic.
-  if (stuck > 1) flushErr = `${stuck} stuck, first: ${flushErr}`;
+  if (stuckNow.length > 1) flushErr = `${stuckNow.length} stuck, first: ${flushErr}`;
+  stuckIds = stuckNow;
   flushing = false;
+  queueBadge();
+}
+// Some uploads never come good — the file went, or the server will refuse it
+// forever — and the only thing left is to stop being told about them. Offered
+// only for what a flush actually rejected, so a queue merely waiting out a dead
+// network is never on the table, and only from home: the runner is no place to
+// be shown a destructive button. What goes is the description too, not just the
+// file, which is why this asks first and why it is never automatic.
+async function discardStuck() {
+  if (!stuckIds.length) return;
+  const n = stuckIds.length;
+  if (!confirm(`Discard ${n} upload${n > 1 ? 's' : ''} that will not go through?\n\n`
+    + `${flushErr}\n\nThe ${n > 1 ? 'files and their descriptions' : 'file and its description'} `
+    + 'will be gone for good. Anything still waiting on the network is left alone.')) return;
+  for (const id of stuckIds) await idb('readwrite', s => s.delete(id)).catch(() => {});
+  stuckIds = [];
+  flushErr = '';
+  dropped += n;
   queueBadge();
 }
 addEventListener('online', flushQueue);
@@ -858,6 +887,12 @@ const SORTS = {
 };
 // An entry's day in the reader's own timezone — a picture taken at 23:30 belongs
 // to that evening, not to the next UTC day.
+// Height follows content. One delegated listener rather than a binding per
+// field, since editEntry builds its textarea long after this runs — and setting
+// .value in code fires no input event, so dictation and both openers call it.
+const grow = t => { t.style.height = 'auto'; t.style.height = `${t.scrollHeight}px`; };
+addEventListener('input', e => e.target.matches?.('textarea.grow') && grow(e.target));
+
 const day = iso => { const d = new Date(iso); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
 /* --- how far back the log reaches ---------------------------------------
    It opens on the last week, because the question is nearly always "what
@@ -988,7 +1023,7 @@ function editEntry(e, card) {
     ? items.map((raw, i) => `<option value="${i}"${i === e.step ? ' selected' : ''}>${pad2(i + 1)} ${esc(parseStep(raw).text)}</option>`).join('')
     : `<option value="${e.step}">${esc(e.step_text)}</option>`;
   const form = make('div', { className: 'panel editor', innerHTML: `
-    <label><span class="eyebrow">Description</span><input class="edNote" value="${esc(e.note)}"></label>
+    <label><span class="eyebrow">Description</span><textarea class="edNote grow" rows="2">${esc(e.note)}</textarea></label>
     <label><span class="eyebrow">Belongs to step</span><select class="edStep">${options}</select></label>` +
     (e.path ? `<label class="row" style="gap:.5rem;margin-bottom:1rem">
       <input type="checkbox" class="edDrop" style="width:auto">
@@ -1001,6 +1036,7 @@ function editEntry(e, card) {
     make('span', { className: 'note edMsg' }),
   ]));
   card.append(form);
+  grow(form.querySelector('.edNote'));       // an existing description may already be several lines
   form.querySelector('.edNote').focus();
 }
 // Upload the additions first, then move the row, then delete what was dropped:
@@ -1510,7 +1546,7 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY) {
 /* ================= boot ================= */
 Object.assign(window, { $, edit, save, removeList, start, mark, move, undo, quit, toggleMic, renderHome, setMode,
                         magicLink, saveShot, cancelShot, newNote, dictate, showLog, showRuns,
-                        exportLog, exportCsv, showAccount, changeEmail, changePassword,
+                        exportLog, exportCsv, showAccount, changeEmail, changePassword, discardStuck,
                         signOut: () => sb.auth.signOut() });
 if (!SR) $('support').textContent = 'Voice control needs Chrome, Edge or Safari — this browser has no Web Speech API.';
 setMode('up');
