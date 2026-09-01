@@ -499,14 +499,37 @@ interaction: challenge, response, next item.
 
 ## Plausible next steps
 
-Nothing here is committed to; listed so the reasoning isn't re-derived later.
+Nothing here is committed to; listed so the reasoning isn't re-derived later, and
+ranked by when the lack would be felt rather than by how interesting it is to
+build. The readable version, with the reasoning per item, is the roadmap page:
+https://claude.ai/code/artifact/a87df55d-2795-4b4b-90ae-d920b6350869
 
-1. Run history — every completed run with its per-step times; the data is already
-   collected, and `log_entries` is now the obvious table to hang it off.
-2. Realtime propagation for live lists (`postgres_changes`, ~5 lines) so a shared
-   list updates without a focus/sync.
-3. Reorder steps by drag, if editing raw lines in the textarea starts to chafe.
-4. A "wake word" so the mic can stay off until called, instead of listening for
-   the whole run.
-5. A subject/animal id asked for at `start()` and stamped on the run and its
-   entries. The axis the log is actually searched by, and the one still missing.
+| # | Thing | Cost |
+|---|-------|------|
+| 1 | Log an entry without running a checklist — a note needs a run today, so writing up a past day means starting and quitting one | afternoon |
+| 2 | Open one run's files from the Runs screen; make the run tag a search term | hour |
+| 3 | Day headings in the log, and This week / Last week / This month presets. The exports follow, since they write what is on screen | afternoon |
+| 4 | `@photo` on a step line, same grammar as `@40s`: the step will not close without a file | hour |
+| 5 | A recorded audio note (`MediaRecorder`) — dictation needs a quiet room, a scrub room is not one, and the log already stores files | afternoon |
+| 6 | "Log this again" on an entry: same text and step, dated today | hour |
+| 7 | A subject/animal id on the run, shown and exported. The axis the log is really searched by. Try search first — it costs nothing | migration |
+| 8 | What is using the gigabyte: largest files, per checklist, with a way to pull one down and remove it. Clips are stored as shot | afternoon |
+| 9 | A deviation flag on an entry — red in the log, a column in the CSV | afternoon + migration |
+| 10 | Which steps keep getting skipped, across runs. The `runs` rows already hold it | afternoon |
+| 11 | Copy the filtered log as Markdown, for the message you actually send | hour |
+| 12 | A wake word, so the mic is not listening for the whole run | afternoon |
+| 13 | Realtime propagation for live lists (`postgres_changes`, ~5 lines). Only worth it once a list is really shared | hour |
+| 14 | Drag to reorder steps, if editing raw lines in the textarea starts to chafe | afternoon |
+| 15 | **Numbers, not sentences** — a step that captures a value and a unit, so the CSV has columns to plot. The one that changes the data model | project |
+| 16 | Take everything out in one archive — lists, entries, runs, files. A record you cannot carry out is not a record | weekend |
+| 17 | A read-only role, and a witness signature on a finished run | weekend |
+| 18 | Annotate a picture on a canvas, saved as a second file so the original survives | weekend |
+| 19 | Move search and the date range into PostgREST, when hundreds become thousands | afternoon, later |
+
+**Deliberately not building.** A native app (the PWA installs, records, works
+offline, and updates 30s after a push). Video transcoding (ffmpeg.wasm is larger
+than the app — record shorter clips). Push reminders (iOS web push needs the app
+installed and still under-delivers; a repeating calendar event does it today). A
+formatting toolbar (descriptions are dictated with gloves on). Charts in the app
+(the statistics happen elsewhere; the CSV is the interface). A build step (one
+file with no bundler is why a fix is live in thirty seconds).
