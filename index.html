@@ -907,6 +907,14 @@ const SORTS = {
 const grow = t => { t.style.height = 'auto'; t.style.height = `${t.scrollHeight}px`; };
 addEventListener('input', e => e.target.matches?.('textarea.grow') && grow(e.target));
 
+// The moment a card is filed under. To the minute, not to the millisecond: the
+// When field is minute-precision, so an edited row comes back truncated while
+// the siblings it was logged with keep their seconds.
+const minuteOf = t => Math.floor(new Date(t) / 60000);
+// Every other row of the card this one is in, and mine to change.
+const cardMates = (rows, e, me) => rows.filter(x => x.id !== e.id && x.owner === me
+  && x.run_id && x.run_id === e.run_id && x.step === e.step && x.note === e.note
+  && minuteOf(x.created_at) === minuteOf(e.created_at));
 const day = iso => { const d = new Date(iso); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
 /* --- how far back the log reaches ---------------------------------------
    It opens on the last week, because the question is nearly always "what
@@ -983,12 +991,9 @@ function renderEntries() {
 function groupRows(rows) {
   const groups = [], byKey = new Map();
   for (const e of rows) {
-    // To the minute, not to the millisecond: the When field is minute-precision, so
-    // an edited row comes back truncated while the siblings it was logged with keep
-    // their seconds, and exact instants would file them apart forever.
     // ponytail: two captures inside one minute, same step, same description, read as
     // one card. Compare exact instants again if that ever turns out to matter.
-    const key = e.run_id ? `${e.run_id}|${e.step}|${Math.floor(new Date(e.created_at) / 60000)}|${e.note}` : e.id;
+    const key = e.run_id ? `${e.run_id}|${e.step}|${minuteOf(e.created_at)}|${e.note}` : e.id;
     if (!byKey.has(key)) byKey.set(key, groups[groups.push([]) - 1]);
     byKey.get(key).push(e);
   }
@@ -1072,6 +1077,14 @@ async function saveEntryEdit(e, form) {
   const patch = { note: form.querySelector('.edNote').value.trim(), step,
                   step_text: items[step] ? parseStep(items[step]).text : e.step_text };
   if (typed !== dtLocal(e.created_at)) patch.created_at = when.toISOString();
+  // A card shows one description over a row of thumbnails, so the description is
+  // the card's, not this one file's — patching this row alone is what split a
+  // card in two. The step is not carried over: moving a picture to the step it
+  // belongs on is a per-file correction, and leaving the card is the point of it.
+  const mates = cardMates(logRows, e, user.id);
+  const shared = {};
+  if (patch.note !== e.note) shared.note = patch.note;
+  if (patch.created_at) shared.created_at = patch.created_at;
   const files = [...form.querySelector('.edFile').files];
   if (drop && !files.length && !patch.note)
     return note(msg, 'That would leave nothing — delete the entry instead.', true);
@@ -1094,6 +1107,11 @@ async function saveEntryEdit(e, form) {
   if ((drop || !old) && added.length) Object.assign(patch, added.shift());   // the first fills this entry
   const { error } = await sb.from('log_entries').update(patch).eq('id', e.id);
   if (error) return note(msg, error.message, true);
+  if (mates.length && Object.keys(shared).length) {
+    const { error: err } = await sb.from('log_entries').update(shared).in('id', mates.map(m => m.id));
+    if (err) return note(msg, err.message, true);
+    for (const m of mates) Object.assign(m, shared);
+  }
   if (drop && old) await sb.storage.from('logs').remove([old]);
 
   // Anything still in hand joins the same step, run and description as its own
@@ -1608,10 +1626,16 @@ if (location.hash === '#test') {
   eq([ent(1), ent(3), ent(2)].sort(SORTS.old).map(e => e.created_at.slice(8, 10)), ['11', '12', '13']);
   eq([...[ent(1, 5), ent(3, 2), ent(2, 2)]].sort(SORTS.step).map(e => e.step), [2, 2, 5]);   // step wins, newest breaks the tie
   // One card, though the server said "+00:00" and the edit wrote "Z" for the same instant.
-  const shot = at => ({ id: at, run_id: 'r', step: 1, note: 'n', created_at: at });
+  const shot = (at, o) => ({ id: at, owner: 'me', run_id: 'r', step: 1, note: 'n', created_at: at, ...o });
   eq(groupRows([shot('2026-08-31T21:00:00+00:00'), shot('2026-08-31T21:00:00Z')]).length, 1);
   eq(groupRows([shot('2026-08-31T21:00:00Z'), shot('2026-08-31T21:00:37Z')]).length, 1);   // an edit rounded one down
   eq(groupRows([shot('2026-08-31T21:00:37Z'), shot('2026-08-31T21:01:00Z')]).length, 2);   // a minute apart is two
+  // A description belongs to the card: an edit carries to the rows logged with it,
+  // and to nothing else — not another description, not somebody else's row.
+  const at = '2026-08-31T21:39:12Z', one = shot(at, { id: 'one' });
+  const card = [one, shot(at, { id: 'two' }), shot(at, { id: 'three', note: 'other' }),
+                shot(at, { id: 'four', owner: 'you' }), shot('2026-08-31T21:40:00Z', { id: 'five' })];
+  eq(cardMates(card, one, 'me').map(x => x.id), ['two']);
   eq(csvCell('Cut at 10 µm, "clean"'), '"Cut at 10 µm, ""clean"""');   // commas and quotes survive
   eq(csvCell(null), '""');
   const row = (id, t, at, owner = 'me') => ({ id, owner, title: t, items: [], deleted: false,

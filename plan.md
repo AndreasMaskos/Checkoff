@@ -154,8 +154,13 @@ edited, moved to another step or deleted on its own. **Log** on the home row lis
 that checklist, newest first. **Files logged together — same run, same step, same
 minute, same description — are shown as one card with a row of thumbnails**,
 because that is what they were: one action. They remain separate rows in the
-database, so each is edited and deleted on its own; a file's Edit and Delete
-appear when it is expanded. Clicking a thumbnail expands it across the row,
+database, so each is deleted on its own and each can be moved to another step on
+its own; a file's Edit and Delete appear when it is expanded. **The description
+and the timestamp, though, belong to the card** — one text over the row of
+thumbnails — so editing either carries to every row logged with it. Patching one
+row alone is what used to split a card in two: the file that got the correction
+stopped matching the ones it was logged with, and the log showed the same moment
+twice. Clicking a thumbnail expands it across the row,
 clicking a picture again shrinks it, and a collapsed clip has a transparent
 overlay so the first tap expands it rather than landing on the play button.
 
@@ -230,10 +235,12 @@ edit inherit the corrected time, not the original.
 
 The field is only written back **when it was actually changed**. It shows whole
 minutes, so saving an untouched edit would round 21:00:37 down to 21:00 and drop
-that file out of the card its siblings are still in. The grouping key compares the moment
+that file out of the card its siblings are still in. The grouping key (`minuteOf`) compares the moment
 **to the minute** rather than the timestamp string, which repairs the rows an
 earlier edit already rounded and survives the two spellings of one instant —
-Postgres hands back `+00:00` where an edit writes `Z`.
+Postgres hands back `+00:00` where an edit writes `Z`. `cardMates` picks the rows
+an edit carries to with the same rule, so the two cannot disagree about what one
+card is.
 
 Nothing validates the date beyond it being one. A run entered for next Tuesday
 sorts to the top of the log and stays there, which is the reader's problem to
