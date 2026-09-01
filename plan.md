@@ -152,7 +152,7 @@ step often needs the PSLAX, the four-chamber and the doppler trace — and they
 share the one description while each becomes its own entry, so any of them can be
 edited, moved to another step or deleted on its own. **Log** on the home row lists everything for
 that checklist, newest first. **Files logged together — same run, same step, same
-moment, same description — are shown as one card with a row of thumbnails**,
+minute, same description — are shown as one card with a row of thumbnails**,
 because that is what they were: one action. They remain separate rows in the
 database, so each is edited and deleted on its own; a file's Edit and Delete
 appear when it is expanded. Clicking a thumbnail expands it across the row,
@@ -230,10 +230,10 @@ edit inherit the corrected time, not the original.
 
 The field is only written back **when it was actually changed**. It shows whole
 minutes, so saving an untouched edit would round 21:00:37 down to 21:00 and drop
-that file out of the card its siblings are still in. For the same reason the
-grouping key compares the *instant* (`+new Date`) rather than the timestamp
-string: Postgres hands back `+00:00` and an edit writes `Z`, and the two spellings
-of one moment used to make two cards out of one.
+that file out of the card its siblings are still in. The grouping key compares the moment
+**to the minute** rather than the timestamp string, which repairs the rows an
+earlier edit already rounded and survives the two spellings of one instant —
+Postgres hands back `+00:00` where an edit writes `Z`.
 
 Nothing validates the date beyond it being one. A run entered for next Tuesday
 sorts to the top of the log and stays there, which is the reader's problem to

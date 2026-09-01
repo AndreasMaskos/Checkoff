@@ -983,7 +983,12 @@ function renderEntries() {
 function groupRows(rows) {
   const groups = [], byKey = new Map();
   for (const e of rows) {
-    const key = e.run_id ? `${e.run_id}|${e.step}|${+new Date(e.created_at)}|${e.note}` : e.id;
+    // To the minute, not to the millisecond: the When field is minute-precision, so
+    // an edited row comes back truncated while the siblings it was logged with keep
+    // their seconds, and exact instants would file them apart forever.
+    // ponytail: two captures inside one minute, same step, same description, read as
+    // one card. Compare exact instants again if that ever turns out to matter.
+    const key = e.run_id ? `${e.run_id}|${e.step}|${Math.floor(new Date(e.created_at) / 60000)}|${e.note}` : e.id;
     if (!byKey.has(key)) byKey.set(key, groups[groups.push([]) - 1]);
     byKey.get(key).push(e);
   }
@@ -1605,7 +1610,8 @@ if (location.hash === '#test') {
   // One card, though the server said "+00:00" and the edit wrote "Z" for the same instant.
   const shot = at => ({ id: at, run_id: 'r', step: 1, note: 'n', created_at: at });
   eq(groupRows([shot('2026-08-31T21:00:00+00:00'), shot('2026-08-31T21:00:00Z')]).length, 1);
-  eq(groupRows([shot('2026-08-31T21:00:00Z'), shot('2026-08-31T21:00:37Z')]).length, 2);   // a real minute apart is two
+  eq(groupRows([shot('2026-08-31T21:00:00Z'), shot('2026-08-31T21:00:37Z')]).length, 1);   // an edit rounded one down
+  eq(groupRows([shot('2026-08-31T21:00:37Z'), shot('2026-08-31T21:01:00Z')]).length, 2);   // a minute apart is two
   eq(csvCell('Cut at 10 µm, "clean"'), '"Cut at 10 µm, ""clean"""');   // commas and quotes survive
   eq(csvCell(null), '""');
   const row = (id, t, at, owner = 'me') => ({ id, owner, title: t, items: [], deleted: false,
