@@ -151,21 +151,27 @@ optional description before saving. **Several files can be picked at once** — 
 step often needs the PSLAX, the four-chamber and the doppler trace — and they
 share the one description while each becomes its own entry, so any of them can be
 edited, moved to another step or deleted on its own. **Log** on the home row lists everything for
-that checklist, newest first. **Files logged together — same run, same step, same
-minute, same description — are shown as one card with a row of thumbnails**,
-because that is what they were: one action. They remain separate rows in the
-database, so each is deleted on its own and each can be moved to another step on
-its own; a file's Edit and Delete appear when it is expanded. **The description
-and the timestamp, though, belong to the card** — one text over the row of
-thumbnails — so editing either carries to every row logged with it. Patching one
-row alone is what used to split a card in two: the file that got the correction
-stopped matching the ones it was logged with, and the log showed the same moment
-twice. Clicking a thumbnail expands it across the row,
+that checklist, newest first. **Files logged together are one entry with a row of
+thumbnails**, because that is what they were: one action. `group_id` is what
+says so — every file of one save gets the same one — and they remain separate
+rows, so each is still shown, moved and deleted on its own; a file's Edit and
+Delete appear when it is expanded. **The description and the timestamp belong to
+the entry**, one text over the row of thumbnails, so editing either carries to
+every file in it. Changing the **step** is the one edit about a single file:
+that file leaves with a group of its own, which is the point of moving a picture
+to the step it belongs on.
+
+The card used to be *derived* — same run, same step, same minute, same
+description — and every per-file edit re-derived it differently. Correcting the
+description while adding a picture was enough to walk that file out of its own
+card, and the same moment appeared twice in the log, then three times. A
+timestamp rounded to the minute by the When field did it too. An id settles what
+belongs together; nothing an edit does to one row can change its mind. Clicking a thumbnail expands it across the row,
 clicking a picture again shrinks it, and a collapsed clip has a transparent
 overlay so the first tap expands it rather than landing on the play button.
 
 ```js
-log_entries: { id, list_id, owner, step, step_text, note, path, created_at, deleted_at }
+log_entries: { id, group_id, list_id, owner, step, step_text, note, path, created_at, deleted_at }
 ```
 
 **Entries are editable.** A dictated description comes out wrong, a picture gets
@@ -235,12 +241,10 @@ edit inherit the corrected time, not the original.
 
 The field is only written back **when it was actually changed**. It shows whole
 minutes, so saving an untouched edit would round 21:00:37 down to 21:00 and drop
-that file out of the card its siblings are still in. The grouping key (`minuteOf`) compares the moment
-**to the minute** rather than the timestamp string, which repairs the rows an
-earlier edit already rounded and survives the two spellings of one instant —
-Postgres hands back `+00:00` where an edit writes `Z`. `cardMates` picks the rows
-an edit carries to with the same rule, so the two cannot disagree about what one
-card is.
+that file out of the card its siblings are still in. Rows that already
+diverged were repaired by the backfill in `20260901090000_entry_group.sql`,
+which grouped by run, owner, step and minute — everything the old rule used
+except the description, since a description pulled apart is exactly the damage.
 
 Nothing validates the date beyond it being one. A run entered for next Tuesday
 sorts to the top of the log and stays there, which is the reader's problem to
