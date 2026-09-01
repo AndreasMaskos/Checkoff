@@ -1,6 +1,6 @@
 // ponytail: stale-while-revalidate over the app shell. Serves instantly offline,
 // picks up a new version on the next load. Bump CACHE if that ever needs forcing.
-const CACHE = 'checkoff-v3';
+const CACHE = 'checkoff-v4';
 const SHELL = ['./', 'index.html', 'config.js', 'manifest.json', 'icon.svg', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -17,11 +17,14 @@ self.addEventListener('fetch', e => {
 
   // The page itself is network-first: a deploy is then live on the next load
   // rather than the one after, which is how "my change isn't there" happens.
+  // cache: 'reload' because network-first was still not first enough — Pages
+  // serves index.html with max-age=600, so plain fetch() was answered by the
+  // browser's own cache with a copy up to ten minutes old.
   // Offline still works — the cached copy is the fallback.
   if (e.request.mode === 'navigate' || e.request.destination === 'document') {
     e.respondWith(caches.open(CACHE).then(async cache => {
       try {
-        const fresh = await fetch(e.request);
+        const fresh = await fetch(e.request, { cache: 'reload' });
         cache.put(e.request, fresh.clone());
         return fresh;
       } catch {
