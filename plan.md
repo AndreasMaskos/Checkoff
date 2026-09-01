@@ -36,6 +36,9 @@ Last updated 2026-08-31.
 | 20 | Storage bar on the Account page — bytes used against the free tier's 1 GB | done, live |
 | 21 | Descriptions grow to fit; stuck uploads can be discarded from home | done, live |
 | 22 | Retrospective entry — a capture, and the run around it, dated to when it happened | done, live |
+| 23 | An entry is one unit with several files (`group_id`) | done, live |
+| 24 | Subject on the run — animal, patient or sample, by name and by id | done, live |
+| 25 | Day headings and This week / Last week / This month; a run's own log; Copy as text | done, live |
 | 14 | Purge of a deleted checklist and its log | done, live |
 | 15 | Export of the filtered log — standalone HTML or CSV | done, live |
 | 16 | Offline upload queue, run ids, notes without a picture | done, live |
@@ -171,7 +174,7 @@ clicking a picture again shrinks it, and a collapsed clip has a transparent
 overlay so the first tap expands it rather than landing on the play button.
 
 ```js
-log_entries: { id, group_id, list_id, owner, step, step_text, note, path, created_at, deleted_at }
+log_entries: { id, group_id, list_id, owner, subject, subject_id, step, step_text, note, path, created_at, deleted_at }
 ```
 
 **Entries are editable.** A dictated description comes out wrong, a picture gets
@@ -198,12 +201,37 @@ Their log view carries the one button that ends it: **Delete checklist and log
 permanently** removes the stored files, then the `lists` row — `log_entries` and
 `shares` cascade off it, so the files are the only part done by hand.
 
-**Search** filters by description, step text *and* checklist name, narrowed by an
+**Who the run is about.** An animal, a patient, a sample: a **name** and an **id**,
+because they are looked up by different people and are not the same thing. Set
+from the runner — the eyebrow beside the step counter, blank until it is used —
+and carried by the run, so every capture after it is stamped without being asked
+again and the name stays on screen while you log, which is the whole reason to
+ask. Both are free text and both are optional: a checklist for grinding coffee
+has no subject, and being asked every run is how a field stops being filled in
+honestly. They live on `log_entries` *and* on `runs`, are correctable in the
+entry editor like the description, and carry to the rest of the entry the same
+way. Names of people end up here, so they sit under the same RLS as everything
+else and are visible to everyone on a live-shared checklist — worth knowing
+before a patient name goes in one.
+
+**Search** filters by description, step text, checklist name, subject, subject id
+*and* the run — `searchable()` puts the run id in twice, bare so the tag printed
+on the card (`0b03`) finds it and behind the word so `run 0b03` does too. **Show
+this run's log** on the Runs screen is exactly that search, with the seven-day
+window opened up first, since an old run would otherwise land on an empty log.
+It is narrowed by an
 optional **From**/**To** date range (native `<input type="date">`, both ends
 inclusive, either end optional), all client-side over the rows already fetched.
 Dates compare on the reader's local day, so a picture taken at 23:30 belongs to
 that evening rather than to the next UTC one. Deleting patches those rows in
 place instead of refetching, so the filters survive it.
+
+Under a date order the log reads as a journal, so it gets a journal's **day
+headings** — the full date and how many entries fall on it. Under step or
+checklist order they are left out: the days are interleaved by definition there,
+and a day heading would be a lie. **This week · Last week · This month** set From
+and To to the three ranges actually asked for; the week starts on Monday, because
+a working week does.
 
 The log **opens on the last seven days** — the question is nearly always "what
 happened today" — and **Load another month** walks *From* back one calendar month
@@ -280,6 +308,11 @@ and the file starts with a BOM, which is what makes Excel read it as UTF-8
 instead of mangling umlauts. Separator is a comma; German Excel may want the
 import dialog for that.
 
+**Copy as text** puts the same rows on the clipboard as plain Markdown — day
+headings, one bold meta line per entry, the description, the file names. HTML is
+for the notebook and CSV is for the spreadsheet; neither is what gets pasted into
+a message on a Friday afternoon.
+
 **Order** is the reader's choice: newest first (the default), oldest first, by
 step — which groups every run's picture of the same step together — or by
 checklist. It sticks while you move between logs; only Clear resets it.
@@ -322,7 +355,7 @@ keyed by the same `run_id` its log entries carry, holding each step's state and
 elapsed seconds.
 
 ```js
-runs: { id, list_id, owner, title, started_at, finished_at, steps: [{ text, state, secs }] }
+runs: { id, list_id, owner, title, subject, subject_id, started_at, finished_at, steps: [{ text, state, secs }] }
 ```
 
 Written twice — on completion and on the way out — and **upserted**, so finishing
@@ -507,16 +540,16 @@ https://claude.ai/code/artifact/a87df55d-2795-4b4b-90ae-d920b6350869
 | # | Thing | Cost |
 |---|-------|------|
 | 1 | Log an entry without running a checklist — a note needs a run today, so writing up a past day means starting and quitting one | afternoon |
-| 2 | Open one run's files from the Runs screen; make the run tag a search term | hour |
-| 3 | Day headings in the log, and This week / Last week / This month presets. The exports follow, since they write what is on screen | afternoon |
+| ~~2~~ | ~~Open one run's files from the Runs screen; make the run tag a search term~~ — done | — |
+| ~~3~~ | ~~Day headings, and This week / Last week / This month~~ — done | — |
 | 4 | `@photo` on a step line, same grammar as `@40s`: the step will not close without a file | hour |
 | 5 | A recorded audio note (`MediaRecorder`) — dictation needs a quiet room, a scrub room is not one, and the log already stores files | afternoon |
 | 6 | "Log this again" on an entry: same text and step, dated today | hour |
-| 7 | A subject/animal id on the run, shown and exported. The axis the log is really searched by. Try search first — it costs nothing | migration |
+| ~~7~~ | ~~A subject on the run, shown and exported~~ — done, with a name and an id, for animals and people | — |
 | 8 | What is using the gigabyte: largest files, per checklist, with a way to pull one down and remove it. Clips are stored as shot | afternoon |
 | 9 | A deviation flag on an entry — red in the log, a column in the CSV | afternoon + migration |
 | 10 | Which steps keep getting skipped, across runs. The `runs` rows already hold it | afternoon |
-| 11 | Copy the filtered log as Markdown, for the message you actually send | hour |
+| ~~11~~ | ~~Copy the filtered log as Markdown~~ — done | — |
 | 12 | A wake word, so the mic is not listening for the whole run | afternoon |
 | 13 | Realtime propagation for live lists (`postgres_changes`, ~5 lines). Only worth it once a list is really shared | hour |
 | 14 | Drag to reorder steps, if editing raw lines in the textarea starts to chafe | afternoon |

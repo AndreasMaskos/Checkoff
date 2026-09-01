@@ -92,6 +92,12 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
 .empty { padding: 3rem 0; border-bottom: 1px solid var(--line); }
 .empty p { margin: 0 0 .35rem; color: var(--dim); }
 
+/* The log reads as a journal under a date order, so it gets a journal's days. */
+.dayhead { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem;
+           margin: 2.25rem 0 .25rem; padding-bottom: .4rem; border-bottom: 1px solid var(--fg);
+           font: 600 .9375rem/1.3 var(--sans); }
+.dayhead:first-child { margin-top: 1.25rem; }
+
 /* --- runner: the teleprompter --- */
 #log { padding-top: .5rem; }
 .line {
@@ -103,7 +109,13 @@ label .eyebrow { display: block; margin-bottom: .35rem; }
 .line.checked .txt { text-decoration: line-through; }
 .line.checked .num { color: var(--go); }
 #stage { padding: clamp(1.5rem, 6vw, 2.75rem) 0; }
-#counter { display: flex; align-items: baseline; gap: .6rem; margin-bottom: .5rem; }
+#counter { display: flex; align-items: baseline; gap: .6rem; margin-bottom: .5rem; flex-wrap: wrap; }
+/* Who the run is about, on screen for the whole run and one tap from changing.
+   An eyebrow that answers, rather than a .btn — it sits in a row of labels. */
+#subjBtn { background: none; border: 0; padding: 0; cursor: pointer;
+           font-size: .6875rem; letter-spacing: .12em; }
+#subjBtn:hover { color: var(--fg); }
+#subjBtn.set { color: var(--go); }
 #challenge {
   font: 650 clamp(1.875rem, 8vw, 3.25rem)/1.08 var(--sans);
   letter-spacing: -.03em; margin: 0; text-wrap: balance;
@@ -177,8 +189,10 @@ a.doc:hover { border-color: var(--fg); }
 .entry .media .acts { gap: .25rem; margin-top: .35rem; }
 .entry .media .acts .btn { font-size: .6875rem; padding: .35rem .45rem; }
 .entry { border-bottom: 1px solid var(--line); padding: 1rem 0; }
-.entry .meta { display: flex; gap: .75rem; font-size: .6875rem; letter-spacing: .1em;
-               text-transform: uppercase; color: var(--dim); margin-bottom: .5rem; }
+.entry .meta { display: flex; flex-wrap: wrap; gap: .35rem .75rem; font-size: .6875rem;
+               letter-spacing: .1em; text-transform: uppercase; color: var(--dim); margin-bottom: .5rem; }
+.entry .meta .subject { color: var(--go); font-weight: 600; }
+.entry .runActs { margin-top: .6rem; }
 .entry .meta .when { margin-left: auto; flex: none; }
 .entry .meta .badge { color: var(--over); }
 .entry .meta .which { color: var(--fg); font-weight: 600; }
@@ -242,9 +256,24 @@ a.doc:hover { border-color: var(--fg); }
 <section id="runner" class="hidden">
   <div id="log"></div>
   <div id="stage">
-    <div id="counter"><span class="eyebrow" id="stepNo"></span><span class="eyebrow" id="listName"></span></div>
+    <div id="counter"><span class="eyebrow" id="stepNo"></span><span class="eyebrow" id="listName"></span>
+      <button class="eyebrow" id="subjBtn" onclick="openSubject()"></button></div>
     <h1 id="challenge"></h1>
     <div id="clock" class="hidden"></div>
+  </div>
+  <div class="panel hidden" id="subjPanel">
+    <h2>Who this run is about</h2>
+    <label><span class="eyebrow">Name</span>
+      <input id="subjName" placeholder="Pig 7, or a patient's name"></label>
+    <label><span class="eyebrow">ID</span>
+      <input id="subjId" placeholder="Animal or patient number"></label>
+    <p class="note">Stamped on this run and on everything logged from here on. Stored with
+      your log and visible to everyone on a shared checklist — leave both blank if the run
+      is not about anyone.</p>
+    <div class="row">
+      <button class="btn go" onclick="saveSubject()">Use for this run</button>
+      <button class="btn" onclick="$('subjPanel').classList.add('hidden')">Cancel</button>
+    </div>
   </div>
   <div class="panel hidden" id="shotPanel">
     <h2 id="shotStep">Log this step</h2>
@@ -295,12 +324,17 @@ a.doc:hover { border-color: var(--fg); }
   <h1 id="logTitle" style="font:650 1.75rem/1.15 var(--sans);letter-spacing:-.03em;margin:.2rem 0 1.25rem"></h1>
   <label>
     <span class="eyebrow">Search descriptions</span>
-    <input id="logSearch" type="search" placeholder="Words from a description, step or checklist">
+    <input id="logSearch" type="search" placeholder="A description, a step, a subject, or run 0b03">
   </label>
   <div class="row" style="margin-bottom:1rem">
     <label style="flex:1;min-width:9rem;margin:0"><span class="eyebrow">From</span><input id="logFrom" type="date"></label>
     <label style="flex:1;min-width:9rem;margin:0"><span class="eyebrow">To</span><input id="logTo" type="date"></label>
     <button class="btn quiet" id="logClear">Clear</button>
+  </div>
+  <div class="row" style="margin:-.5rem 0 1rem">
+    <button class="btn quiet" onclick="setRange('week')">This week</button>
+    <button class="btn quiet" onclick="setRange('last')">Last week</button>
+    <button class="btn quiet" onclick="setRange('month')">This month</button>
   </div>
   <label>
     <span class="eyebrow">Order</span>
@@ -316,6 +350,7 @@ a.doc:hover { border-color: var(--fg); }
   <div class="row" style="margin-top:1.5rem">
     <button class="btn" id="logExport" onclick="exportLog()">Export HTML</button>
     <button class="btn" onclick="exportCsv()">Export CSV</button>
+    <button class="btn" id="logCopy" onclick="copyLog()">Copy as text</button>
     <span class="spacer"></span>
     <button class="btn quiet hidden" id="logPurge">Delete checklist and log permanently</button>
   </div>
@@ -541,12 +576,37 @@ function start(id) {
   const list = byId(id);
   const steps = list.items.map(parseStep);
   run = { id, runId: crypto.randomUUID(), title: list.title, steps, at: 0, startedAt: Date.now(), shift: 0,
+          subject: '', subjectId: '',
           state: steps.map(() => null), times: steps.map(() => 0),
           enteredAt: Date.now(), deadline: 0, rang: false, history: [] };
   $('listName').textContent = list.title;
+  renderSubject();
   renderRun();
   show('runner');
   navigator.wakeLock?.request('screen').catch(() => {});
+}
+/* --- who the run is about ------------------------------------------------
+   An animal, a patient, a sample. Optional, set once and carried by the run
+   itself, so every capture after it is stamped without being asked again — and
+   so the name is on screen while you log, which is the point of asking at all. */
+const subjectLabel = r => r.subject || r.subject_id
+  ? [r.subject, r.subject_id].filter(Boolean).join(' · ') : '';
+function renderSubject() {
+  const label = subjectLabel({ subject: run.subject, subject_id: run.subjectId });
+  $('subjBtn').textContent = label || 'Subject +';
+  $('subjBtn').classList.toggle('set', !!label);
+}
+function openSubject() {
+  $('subjName').value = run.subject;
+  $('subjId').value = run.subjectId;
+  $('subjPanel').classList.remove('hidden');
+  $('subjName').focus();
+}
+function saveSubject() {
+  run.subject = $('subjName').value.trim();
+  run.subjectId = $('subjId').value.trim();
+  $('subjPanel').classList.add('hidden');
+  renderSubject();
 }
 function stepLine(i, cls) {
   const b = make('button', { className: `line ${cls}`, onclick: () => jump(i) });
@@ -627,6 +687,7 @@ function saveRun() {
   run.enteredAt = Date.now();
   queueUp({ kind: 'run', row: {
     id: run.runId, list_id: run.id, title: run.title,
+    subject: run.subject || null, subject_id: run.subjectId || null,
     started_at: new Date(run.startedAt + run.shift).toISOString(),
     finished_at: new Date(Date.now() + run.shift).toISOString(),
     steps: run.steps.map((s, i) => ({ text: s.text, state: run.state[i], secs: Math.round(run.times[i] / 1000) })),
@@ -641,6 +702,8 @@ let pending = null;
 const MAX = 50 * 1024 * 1024;                 // our own cap, matching Supabase's free-tier per-object limit
 const fit = (w, h, max = 1600) => { const s = Math.min(1, max / Math.max(w, h)); return [Math.round(w * s), Math.round(h * s)]; };
 const stamp = iso => new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+const fullDay = t => new Date(t).toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+const clock = t => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 // What <input type="datetime-local"> wants: local wall-clock, no zone, to the minute.
 // It reads back the same way — new Date('2026-08-30T14:30') is 14:30 here, not UTC.
 const dtLocal = t => { const d = new Date(t); return `${day(d)}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
@@ -798,7 +861,8 @@ async function saveShot() {
   run.shift = when - Date.now();              // the rest of this run follows it back
   const at = when.toISOString();
   const group = crypto.randomUUID();          // everything picked together is one entry
-  const shared = { list: pending.list, run: pending.run, step: pending.step, text: pending.text, note: text, at, group };
+  const shared = { list: pending.list, run: pending.run, step: pending.step, text: pending.text, note: text, at, group,
+                   subject: run.subject, subjectId: run.subjectId };
   if (!pending.items.length) await queueUp({ ...shared, blob: null, ext: '', type: '', name: null });
   for (const it of pending.items) await queueUp({ ...shared, blob: it.blob, ext: it.ext, type: it.type, name: it.name });
   cancelShot();
@@ -824,6 +888,7 @@ async function pushItem(item) {
     id: item.id, list_id: item.list, owner: user.id, run_id: item.run, step: item.step,
     step_text: item.text, note: item.note, path, filename: item.name ?? null, created_at: item.at,
     group_id: item.group ?? item.id,          // an item queued before group ids stands alone
+    subject: item.subject || null, subject_id: item.subjectId || null,
   });
   return error?.code === '23505' ? null : error;    // 23505 = already inserted on an earlier try
 }
@@ -956,15 +1021,41 @@ async function showLog(id) {
   logUrls = Object.fromEntries((signed || []).map(s => [s.path, s.signedUrl]));
   renderEntries();
 }
+// A run's own files: the same Log screen, searched by the run's tag, with the
+// week-long window opened up — an old run would otherwise land on an empty log.
+async function showRunLog(r) {
+  await showLog(r.list_id);
+  $('logFrom').value = ''; $('logTo').value = '';
+  $('logSearch').value = `run ${r.id.slice(0, 4)}`;
+  renderEntries();
+}
+// Everything a search should reach. The run id is in twice over — bare, so the
+// tag on the card ("0b03") finds it, and behind the word, so "run 0b03" does too.
+const searchable = e => [e.note, e.step_text, listTitle(e), e.subject, e.subject_id,
+  e.run_id && `run ${e.run_id}`].filter(Boolean).join(' ').toLowerCase();
 // What the screen is showing: filters and order in one place, so the export and
 // the view can never disagree about "the filtered logs".
 function shownEntries() {
   const q = $('logSearch').value.trim().toLowerCase();
   const from = $('logFrom').value, to = $('logTo').value;      // '' = open-ended; both ends inclusive
   return logRows.filter(e =>
-    (!q || `${e.note} ${e.step_text} ${listTitle(e)}`.toLowerCase().includes(q)) &&
+    (!q || searchable(e).includes(q)) &&
     (!from || day(e.created_at) >= from) && (!to || day(e.created_at) <= to))
     .sort(SORTS[$('logSort').value]);
+}
+/* --- the ranges actually asked for --------------------------------------
+   From and To take any two dates, but the question is nearly always one of
+   three. The week starts on Monday, because a working week does. */
+const mondayOf = d => { const n = new Date(d); n.setDate(n.getDate() - ((n.getDay() + 6) % 7)); return n; };
+function setRange(which) {
+  const now = new Date(), mon = mondayOf(now);
+  if (which === 'week') { $('logFrom').value = day(mon); $('logTo').value = ''; }
+  else if (which === 'last') {
+    const back = new Date(mon); back.setDate(back.getDate() - 7);
+    const end = new Date(mon); end.setDate(end.getDate() - 1);
+    $('logFrom').value = day(back); $('logTo').value = day(end);
+  } else { $('logFrom').value = day(new Date(now.getFullYear(), now.getMonth(), 1)); $('logTo').value = ''; }
+  renderEntries();
 }
 $('logMore').onclick = () => {
   $('logFrom').value = day(monthBack(fromDay($('logFrom').value || daysAgo(7))));
@@ -980,7 +1071,27 @@ function renderEntries() {
     ? '<p class="note">Nothing matches those filters.</p>'
     : `<p class="note">${logList === null ? 'No logs yet.' : 'Nothing logged yet.'} ` +
       'Start a checklist and tap Photo/video on a step.</p>';
-  $('logBody').replaceChildren(...groupRows(rows).map(groupCard));
+  const cards = groupRows(rows);
+  // Under a date order the log reads as a journal, so it gets the journal's
+  // headings. Under step or checklist order the days are interleaved by
+  // definition and a day heading would be a lie.
+  const dated = ['new', 'old'].includes($('logSort').value);
+  const perDay = new Map();
+  for (const c of cards) perDay.set(day(c[0].created_at), (perDay.get(day(c[0].created_at)) ?? 0) + 1);
+  const out = [];
+  let onDay = null;
+  for (const items of cards) {
+    const d = day(items[0].created_at);
+    if (dated && d !== onDay) {
+      onDay = d;
+      const n = perDay.get(d);
+      out.push(make('div', { className: 'dayhead', innerHTML:
+        `<span>${esc(fullDay(items[0].created_at))}</span>` +
+        `<span class="eyebrow">${n} ${n === 1 ? 'entry' : 'entries'}</span>` }));
+    }
+    out.push(groupCard(items));
+  }
+  $('logBody').replaceChildren(...out);
 }
 // Files logged together are one entry with several files, and read as one thing
 // on screen and in an export alike. They stay separate rows in the database, so
@@ -1002,6 +1113,7 @@ function groupCard(items) {
     '<div class="meta">' +
     (logList === null ? `<span class="which">${esc(listTitle(head))}</span>` : '') +
     `<span>${pad2(head.step + 1)} · ${esc(head.step_text)}</span>` +
+    (subjectLabel(head) ? `<span class="subject">${esc(subjectLabel(head))}</span>` : '') +
     (head.run_id ? `<span>run ${esc(runTag(head))}</span>` : '') +
     (items.length > 1 ? `<span>${items.length} files</span>` : '') +
     (gone ? `<span class="badge">deleted ${esc(stamp(head.deleted_at))}</span>` : '') +
@@ -1045,7 +1157,13 @@ function editEntry(e, card) {
   const form = make('div', { className: 'panel editor', innerHTML: `
     <label><span class="eyebrow">Description</span><textarea class="edNote grow" rows="2">${esc(e.note)}</textarea></label>
     <label><span class="eyebrow">Belongs to step</span><select class="edStep">${options}</select></label>
-    <label><span class="eyebrow">When it happened</span><input type="datetime-local" class="edWhen" value="${dtLocal(e.created_at)}"></label>` +
+    <label><span class="eyebrow">When it happened</span><input type="datetime-local" class="edWhen" value="${dtLocal(e.created_at)}"></label>
+    <div class="row" style="margin-bottom:1rem">
+      <label style="flex:1;min-width:8rem;margin:0"><span class="eyebrow">Subject</span>
+        <input class="edSubj" value="${esc(e.subject ?? '')}"></label>
+      <label style="flex:1;min-width:8rem;margin:0"><span class="eyebrow">ID</span>
+        <input class="edSubjId" value="${esc(e.subject_id ?? '')}"></label>
+    </div>` +
     (e.path ? `<label class="row" style="gap:.5rem;margin-bottom:1rem">
       <input type="checkbox" class="edDrop" style="width:auto">
       <span class="note">Delete this ${{ video: 'clip', image: 'picture', file: 'document' }[kindOf(e.path)]}</span></label>` : '') +
@@ -1071,7 +1189,9 @@ async function saveEntryEdit(e, form) {
   const when = new Date(typed);
   if (isNaN(when)) return note(msg, 'That is not a date and time.', true);
   const patch = { note: form.querySelector('.edNote').value.trim(), step,
-                  step_text: items[step] ? parseStep(items[step]).text : e.step_text };
+                  step_text: items[step] ? parseStep(items[step]).text : e.step_text,
+                  subject: form.querySelector('.edSubj').value.trim() || null,
+                  subject_id: form.querySelector('.edSubjId').value.trim() || null };
   if (typed !== dtLocal(e.created_at)) patch.created_at = when.toISOString();
   // The description and the moment are the entry's — one text over the row of
   // thumbnails — so they carry to every file in it. Moving a file to another step
@@ -1083,6 +1203,8 @@ async function saveEntryEdit(e, form) {
   else {
     if (patch.note !== e.note) shared.note = patch.note;
     if (patch.created_at) shared.created_at = patch.created_at;
+    if (patch.subject !== (e.subject ?? null)) shared.subject = patch.subject;
+    if (patch.subject_id !== (e.subject_id ?? null)) shared.subject_id = patch.subject_id;
   }
   const files = [...form.querySelector('.edFile').files];
   if (drop && !files.length && !patch.note)
@@ -1121,6 +1243,7 @@ async function saveEntryEdit(e, form) {
       list_id: e.list_id, owner: user.id, run_id: e.run_id, step, step_text: patch.step_text,
       note: patch.note, path: a.path, filename: a.filename, created_at: patch.created_at ?? e.created_at,
       group_id: patch.group_id ?? e.group_id,   // an addition joins the entry it was added to
+      subject: patch.subject, subject_id: patch.subject_id,
     }))).select();
     if (err) return note(msg, err.message, true);
     extra = data;
@@ -1186,7 +1309,7 @@ async function exportLog() {
     }
     cards.push(`<article${gone ? ' class="gone"' : ''}>
       <h2>${esc(listTitle(head))} · ${pad2(head.step + 1)} ${esc(head.step_text)}</h2>
-      <p class="when">${esc(stamp(head.created_at))}${head.run_id ? ` · run ${esc(runTag(head))}` : ''}${media.length > 1 ? ` · ${media.length} files` : ''}${gone ? ` · deleted ${esc(stamp(head.deleted_at))}` : ''}</p>
+      <p class="when">${esc(stamp(head.created_at))}${subjectLabel(head) ? ` · ${esc(subjectLabel(head))}` : ''}${head.run_id ? ` · run ${esc(runTag(head))}` : ''}${media.length > 1 ? ` · ${media.length} files` : ''}${gone ? ` · deleted ${esc(stamp(head.deleted_at))}` : ''}</p>
       ${head.note ? `<p>${esc(head.note)}</p>` : ''}
       ${media.length ? `<div class="files">${media.join('')}</div>` : ''}</article>`);
   }
@@ -1211,14 +1334,55 @@ ${cards.join('\n')}`;
   btn.disabled = false;
 }
 
+/* --- the log as text ----------------------------------------------------
+   HTML is for the notebook and CSV is for the spreadsheet; neither is what you
+   paste into a message on Friday. Same rows, same order, same grouping — plain
+   Markdown, straight to the clipboard. Day headings only under a date order,
+   for the reason the screen has them only there. */
+function logMarkdown() {
+  const rows = shownEntries();
+  const dated = ['new', 'old'].includes($('logSort').value);
+  const out = [`# ${logList === null ? 'All logs' : byId(logList)?.title ?? 'Log'}`, ''];
+  let onDay = null;
+  for (const items of groupRows(rows)) {
+    const head = items[0];
+    if (dated && day(head.created_at) !== onDay) {
+      onDay = day(head.created_at);
+      out.push(`## ${fullDay(head.created_at)}`, '');
+    }
+    const meta = [clock(head.created_at), logList === null && listTitle(head),
+      `step ${pad2(head.step + 1)} ${head.step_text}`, subjectLabel(head),
+      head.run_id && `run ${runTag(head)}`, head.deleted_at && 'deleted'].filter(Boolean);
+    out.push(`**${meta.join(' · ')}**`);
+    if (head.note) out.push('', head.note);
+    const files = items.filter(e => e.path).map(e => fileLabel(e));
+    if (files.length) out.push('', `Files: ${files.join(', ')}`);
+    out.push('');
+  }
+  return out.join('\n');
+}
+async function copyLog() {
+  const btn = $('logCopy');
+  if (!shownEntries().length) return alert('Nothing to copy with these filters.');
+  try {
+    await navigator.clipboard.writeText(logMarkdown());
+    btn.textContent = 'Copied';
+  } catch {
+    btn.textContent = 'Could not copy';   // Safari refuses without a gesture it recognises
+  }
+  setTimeout(() => { btn.textContent = 'Copy as text'; }, 2000);
+}
+
 // The same rows as a spreadsheet. Every field is quoted, so a description with a
 // comma, a quote or a newline in it survives the round trip.
 const csvCell = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
 function exportCsv() {
   const rows = shownEntries();
   if (!rows.length) return alert('Nothing to export with these filters.');
-  const table = [['When', 'Timestamp', 'Checklist', 'Run', 'Step no', 'Step', 'Description', 'Media', 'File', 'Deleted'],
+  const table = [['When', 'Timestamp', 'Checklist', 'Run', 'Subject', 'Subject ID',
+                  'Step no', 'Step', 'Description', 'Media', 'File', 'Deleted'],
     ...rows.map(e => [stamp(e.created_at), e.created_at, listTitle(e), e.run_id ?? '',
+                      e.subject ?? '', e.subject_id ?? '',
                       e.step + 1, e.step_text, e.note,
                       e.path ? { video: 'video', image: 'photo', file: 'document' }[kindOf(e.path)] : '', fileLabel(e),
                       e.deleted_at ? stamp(e.deleted_at) : ''])];
@@ -1243,8 +1407,9 @@ async function showRuns(id) {
     const done = r.steps.filter(s => s.state === true).length;
     const skipped = r.steps.filter(s => s.state === false).length;
     const left = r.steps.length - done - skipped;
-    return make('div', { className: 'entry', innerHTML:
+    const card = make('div', { className: 'entry', innerHTML:
       `<div class="meta"><span class="which">${esc(stamp(r.started_at))}</span>` +
+      (subjectLabel(r) ? `<span class="subject">${esc(subjectLabel(r))}</span>` : '') +
       `<span>run ${esc(r.id.slice(0, 4))}</span>` +
       `<span class="when">${mmss(total)}</span></div>` +
       `<p class="note">${done} done · ${skipped} skipped` + (left ? ` · ${left} never reached` : '') + '</p>' +
@@ -1252,6 +1417,11 @@ async function showRuns(id) {
         `<span class="num">${s.state === null ? pad2(i + 1) : s.state ? '✓' : '–'}</span>` +
         `<span class="txt">${esc(s.text)}</span>` +
         `<span class="num">${s.secs ? mmss(s.secs) : ''}</span></div>`).join('') });
+    // The run knows what was done; the log holds what it looked like. Nothing
+    // joined them, and the tag on the card was not even a search term.
+    card.append(make('div', { className: 'row runActs' },
+      [button('Show this run’s log', () => showRunLog(r), 'btn quiet')]));
+    return card;
   }));
 }
 
@@ -1634,6 +1804,14 @@ if (location.hash === '#test') {
   // An edit carries to the rest of the entry, and to nothing else.
   const one = shot('one'), card = [one, shot('two'), shot('three', { group_id: 'h' }), shot('four', { owner: 'you' })];
   eq(groupMates(card, one, 'me').map(x => x.id), ['two']);
+  // A working week starts on Monday, and Sunday is its end rather than its start.
+  eq(day(mondayOf(new Date(2026, 8, 6))), '2026-08-31');    // Sunday 6 Sep
+  eq(day(mondayOf(new Date(2026, 8, 7))), '2026-09-07');    // Monday is its own
+  eq(day(mondayOf(new Date(2026, 7, 31))), '2026-08-31');
+  // The run tag on a card is a search term, spelt either way it is read.
+  const hay = searchable({ note: 'x', step_text: 's', subject: 'Pig 7', subject_id: 'A-014',
+                           run_id: '0b03e4f5-0000-0000-0000-000000000000' });
+  eq([hay.includes('0b03'), hay.includes('run 0b03'), hay.includes('a-014')], [true, true, true]);
   eq(csvCell('Cut at 10 µm, "clean"'), '"Cut at 10 µm, ""clean"""');   // commas and quotes survive
   eq(csvCell(null), '""');
   const row = (id, t, at, owner = 'me') => ({ id, owner, title: t, items: [], deleted: false,
