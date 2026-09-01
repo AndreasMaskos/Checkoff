@@ -106,3 +106,17 @@ try {
   unlinkSync(tmp);
 }
 console.log('ok — the page script parses');
+
+// --- every button on the page has a handler that exists ---
+// The script is a module, so nothing in it is global: an inline onclick looks
+// its name up on window and finds nothing unless the name is in the one
+// Object.assign at the bottom. A button wired that way is not broken-looking, it
+// is silently inert — which is how four shipped at once. Cheaper to check here
+// than to find out from someone clicking it.
+const handlers = [...src.matchAll(/onclick="\s*([\w$]+)\s*\(/g)].map(m => m[1]);
+const exposed = src.slice(src.indexOf('Object.assign(window, {'));
+const missing = [...new Set(handlers)].filter(fn =>
+  !new RegExp(`[{,]\\s*${fn.replace('$', '\\$')}\\s*[,:}]`).test(exposed));
+assert.deepStrictEqual(missing, [], `inline onclick handlers not exported to window: ${missing}`);
+assert.ok(handlers.length > 10, 'the onclick scan found almost nothing — did the markup change shape?');
+console.log(`ok — all ${new Set(handlers).size} inline handlers are reachable`);

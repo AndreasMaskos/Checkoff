@@ -476,6 +476,19 @@ interaction: challenge, response, next item.
   other people; a security boundary from that moment on.
 - **The publishable key in `config.js` is public by design** — it identifies the
   project, RLS guards the data. `service_role` must never appear in this repo.
+- **An inline `onclick` needs its name on `window`.** The page script is
+  `<script type="module">`, so nothing declared in it is global: `onclick="foo()"`
+  looks `foo` up on `window` and finds nothing unless it is in the one
+  `Object.assign(window, {…})` at the bottom. A button wired that way does not
+  look broken — it is silently inert, with one line in a console nobody has open.
+  Four shipped at once that way (the date presets, Subject, its Save, Copy as
+  text) and read as "nothing happens" for three rounds. `test.mjs` now fails if
+  any inline handler is missing from that list, and the page logs each dead
+  button at boot.
+- **Pages is not always quick.** Builds have taken 40s, 150s and 610s on the same
+  repo in one afternoon. Poll the deployed file for a string only the new version
+  has (`curl …/index.html?cb=$RANDOM | grep`) before believing a fix is out; the
+  `?cb=` matters, the CDN edge serves the old copy for a while after the build.
 - **Migrations deploy on push to main** via the Supabase GitHub integration.
   Verified working. Always confirm against the live API afterwards
   (`curl $URL/rest/v1/lists?select=id -H "apikey: …"`) rather than trusting it.

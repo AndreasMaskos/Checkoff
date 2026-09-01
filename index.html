@@ -1793,7 +1793,16 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY) {
 Object.assign(window, { $, edit, save, removeList, start, mark, move, undo, quit, toggleMic, renderHome, setMode,
                         magicLink, saveShot, cancelShot, newNote, dictate, showLog, showRuns,
                         exportLog, exportCsv, showAccount, changeEmail, changePassword, discardStuck,
+                        setRange, copyLog, openSubject, saveSubject,
                         signOut: () => sb.auth.signOut() });
+/* This is a module, so nothing above is global: an inline onclick looks its name
+   up on window and a button whose handler is missing from that list does nothing
+   at all, with one line in a console nobody has open. Four shipped that way
+   before it was noticed. The page says so at boot instead. */
+for (const el of document.querySelectorAll('[onclick]')) {
+  const fn = el.getAttribute('onclick').match(/^\s*([\w$]+)\s*\(/)?.[1];
+  if (fn && !(fn in window)) console.error(`Dead button: onclick="${fn}(…)" is not on window.`, el);
+}
 if (!SR) $('support').textContent = 'Voice control needs Chrome, Edge or Safari — this browser has no Web Speech API.';
 setMode('up');
 // Settle the session before the first paint, or every signed-in load flashes the sign-in screen.
