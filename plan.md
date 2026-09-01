@@ -4,7 +4,7 @@ Hands-free checklists for daily repetitive tasks. The app speaks a step, you say
 "done", it checks it off and speaks the next one — so the routine runs the same
 way every time without touching the phone.
 
-Last updated 2026-08-18.
+Last updated 2026-08-31.
 
 ## Where everything is
 
@@ -35,6 +35,7 @@ Last updated 2026-08-18.
 | 19 | Log opens on the last week, Load another month reaches further back | done, live |
 | 20 | Storage bar on the Account page — bytes used against the free tier's 1 GB | done, live |
 | 21 | Descriptions grow to fit; stuck uploads can be discarded from home | done, live |
+| 22 | Retrospective entry — a capture, and the run around it, dated to when it happened | done, live |
 | 14 | Purge of a deleted checklist and its log | done, live |
 | 15 | Export of the filtered log — standalone HTML or CSV | done, live |
 | 16 | Offline upload queue, run ids, notes without a picture | done, live |
@@ -216,6 +217,29 @@ is no place for a destructive button, on the same reasoning that hides Back
 there. Nothing about it is automatic except the zero-byte case, which no retry
 could ever save.
 
+**A log can be written after the fact.** Sunday's run gets entered on Monday
+when Sunday ran late, so the capture panel carries a **When it happened** field
+(native `datetime-local`, defaulting to now) and `created_at` is whatever it
+says. The first backdated save of a run sets `run.shift`, the offset between the
+chosen time and the clock: every later capture of that run opens on the same
+day, and `saveRun` shifts `started_at`/`finished_at` by it too, so a run and its
+pictures never land a day apart. The offset lives on the run and dies with it —
+the next run starts at now again. **Edit** carries the same field, so a
+timestamp is correctable like the description and the step; entries split off an
+edit inherit the corrected time, not the original.
+
+The field is only written back **when it was actually changed**. It shows whole
+minutes, so saving an untouched edit would round 21:00:37 down to 21:00 and drop
+that file out of the card its siblings are still in. For the same reason the
+grouping key compares the *instant* (`+new Date`) rather than the timestamp
+string: Postgres hands back `+00:00` and an edit writes `Z`, and the two spellings
+of one moment used to make two cards out of one.
+
+Nothing validates the date beyond it being one. A run entered for next Tuesday
+sorts to the top of the log and stays there, which is the reader's problem to
+notice — a `max` on the field would have to be rewritten every minute to still
+mean "now".
+
 The signed-in **address in the masthead is the way to the account page**, from
 any screen. It is a real `<button>` rather than a span with a click handler, so
 it focuses and answers Enter. It is inert on the runner for the same reason Back
@@ -293,7 +317,8 @@ runs: { id, list_id, owner, title, started_at, finished_at, steps: [{ text, stat
 Written twice — on completion and on the way out — and **upserted**, so finishing
 a checklist and then exiting is one row rather than two. It rides the same
 offline queue as the captures, keyed by the run id so a second save replaces the
-first in the queue instead of stacking. **Runs** on the home row shows them
+first in the queue instead of stacking. Both timestamps carry the run's
+backdate offset, so a run logged for Sunday is filed under Sunday. **Runs** on the home row shows them
 newest first, with the per-step times and what got skipped.
 
 ## Accounts
