@@ -63,6 +63,7 @@ header #who:disabled { color: var(--dim); cursor: default; }
 .btn.go { background: var(--go); border-color: var(--go); color: var(--bg); font-weight: 700; }
 .btn.quiet { background: none; border-color: transparent; color: var(--dim); padding-inline: .4rem; }
 .btn.quiet:hover { color: var(--fg); }
+.btn.quiet.on { color: var(--go); border-color: var(--go); }
 :where(button, input, textarea, a):focus-visible { outline: 2px solid var(--go); outline-offset: 2px; }
 input, textarea, select {
   font: 400 1rem/1.5 var(--sans); width: 100%; padding: .7rem .8rem; color: var(--fg);
@@ -331,11 +332,12 @@ a.doc:hover { border-color: var(--fg); }
     <label style="flex:1;min-width:9rem;margin:0"><span class="eyebrow">To</span><input id="logTo" type="date"></label>
     <button class="btn quiet" id="logClear">Clear</button>
   </div>
-  <div class="row" style="margin:-.5rem 0 1rem">
-    <button class="btn quiet" onclick="setRange('week')">This week</button>
-    <button class="btn quiet" onclick="setRange('last')">Last week</button>
-    <button class="btn quiet" onclick="setRange('month')">This month</button>
+  <div class="row" style="margin:-.5rem 0 .5rem">
+    <button class="btn quiet" id="rangeWeek" onclick="setRange('week')">This week</button>
+    <button class="btn quiet" id="rangeLast" onclick="setRange('last')">Last week</button>
+    <button class="btn quiet" id="rangeMonth" onclick="setRange('month')">This month</button>
   </div>
+  <p class="note" id="logSpan" style="margin:0 0 1rem"></p>
   <label>
     <span class="eyebrow">Order</span>
     <select id="logSort">
@@ -1045,27 +1047,50 @@ function shownEntries() {
 }
 /* --- the ranges actually asked for --------------------------------------
    From and To take any two dates, but the question is nearly always one of
-   three. The week starts on Monday, because a working week does. */
+   three. The week starts on Monday, because a working week does.
+
+   One table, read by the buttons that set the dates and by the render that says
+   which button is on. On the first of the month "This month" is a narrower
+   window than the week the log opened on, so pressing it can leave the rows
+   exactly as they were — which is why the state is shown rather than inferred
+   from the list moving. */
 const mondayOf = d => { const n = new Date(d); n.setDate(n.getDate() - ((n.getDay() + 6) % 7)); return n; };
-function setRange(which) {
+function ranges() {
   const now = new Date(), mon = mondayOf(now);
-  if (which === 'week') { $('logFrom').value = day(mon); $('logTo').value = ''; }
-  else if (which === 'last') {
-    const back = new Date(mon); back.setDate(back.getDate() - 7);
-    const end = new Date(mon); end.setDate(end.getDate() - 1);
-    $('logFrom').value = day(back); $('logTo').value = day(end);
-  } else { $('logFrom').value = day(new Date(now.getFullYear(), now.getMonth(), 1)); $('logTo').value = ''; }
+  const back = new Date(mon); back.setDate(back.getDate() - 7);
+  const end = new Date(mon); end.setDate(end.getDate() - 1);
+  return { week: [day(mon), ''], last: [day(back), day(end)],
+           month: [day(new Date(now.getFullYear(), now.getMonth(), 1)), ''] };
+}
+function setRange(which) {
+  const [from, to] = ranges()[which];
+  $('logFrom').value = from; $('logTo').value = to;
   renderEntries();
 }
+// What is on screen, in words. Answers "did that button do anything" for the
+// presets, for a typed date and for Load another month alike.
+const spanText = (from, to) =>
+    from && to ? `${fullDay(fromDay(from))} to ${fullDay(fromDay(to))}`
+  : from ? `since ${fullDay(fromDay(from))}`
+  : to ? `up to ${fullDay(fromDay(to))}`
+  : 'the whole log';
 $('logMore').onclick = () => {
   $('logFrom').value = day(monthBack(fromDay($('logFrom').value || daysAgo(7))));
   renderEntries();
 };
 function renderEntries() {
   const rows = shownEntries();
+  const from = $('logFrom').value, to = $('logTo').value, all = ranges();
+  for (const [which, id] of [['week', 'rangeWeek'], ['last', 'rangeLast'], ['month', 'rangeMonth']]) {
+    const on = all[which][0] === from && all[which][1] === to;
+    $(id).classList.toggle('on', on);
+    $(id).setAttribute('aria-pressed', on);
+  }
+  const q = $('logSearch').value.trim();
+  $('logSpan').textContent = `${rows.length} ${rows.length === 1 ? 'entry' : 'entries'} · `
+    + spanText(from, to) + (q ? ` · matching “${q}”` : '');
   // Nothing older than the window means nothing left to load. Sits outside the
   // empty-log early returns below, or an empty week would hide the way out of it.
-  const from = $('logFrom').value;
   $('logMore').classList.toggle('hidden', !(from && logRows.some(e => day(e.created_at) < from)));
   if (!rows.length) return $('logBody').innerHTML = logRows.length
     ? '<p class="note">Nothing matches those filters.</p>'
@@ -1808,6 +1833,9 @@ if (location.hash === '#test') {
   eq(day(mondayOf(new Date(2026, 8, 6))), '2026-08-31');    // Sunday 6 Sep
   eq(day(mondayOf(new Date(2026, 8, 7))), '2026-09-07');    // Monday is its own
   eq(day(mondayOf(new Date(2026, 7, 31))), '2026-08-31');
+  eq(ranges().last[1] < ranges().week[0], true);          // last week ends before this one starts
+  eq(ranges().week[1] === '' && ranges().month[1] === '', true);   // both run up to today
+  eq(spanText('', ''), 'the whole log');
   // The run tag on a card is a search term, spelt either way it is read.
   const hay = searchable({ note: 'x', step_text: 's', subject: 'Pig 7', subject_id: 'A-014',
                            run_id: '0b03e4f5-0000-0000-0000-000000000000' });
