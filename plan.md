@@ -229,18 +229,20 @@ place instead of refetching, so the filters survive it.
 Under a date order the log reads as a journal, so it gets a journal's **day
 headings** — the full date and how many entries fall on it. Under step or
 checklist order they are left out: the days are interleaved by definition there,
-and a day heading would be a lie. **This week · Last week · This month** set From
-and To to the three ranges actually asked for; the week starts on Monday, because
-a working week does. One `ranges()` table both sets the dates and decides which
-button is lit, so the two cannot drift.
+and a day heading would be a lie. **This week · Last week · This month · Last month** set From and To to the four
+ranges actually asked for; the week starts on Monday, because a working week
+does, and last month is `new Date(y, m, 0)` — day zero of this month is the last
+day of the one before, the only spelling that survives January.
 
-The pressed button and a line reading **"4 entries · since Monday, 31 August"**
-are not decoration. On the first of the month, *This month* is a *narrower*
-window than the week the log opens on, so it can leave the rows exactly as they
-were, or empty the screen for a reason that looks like a broken button — both of
-which it did. A filter has to say what it did rather than leave it to be inferred
-from the list moving, and the line answers it for a typed date and Load another
-month too.
+**Every preset closes both ends.** They used not to: "this month" ran from the
+1st to whenever, which for most of a month is the same window the log already
+opens on, so pressing it left the rows exactly as they were and read as a dead
+button. A bounded window shows that period and nothing else, and moves both date
+fields where you can see it. The pressed button is lit and a line reads
+**"4 entries · Monday, 24 August 2026 to Sunday, 30 August 2026"** — a filter has
+to say what it did rather than leave it to be inferred from the list moving, and
+the line answers it for a typed date and Load another month too. One `ranges()`
+table sets the dates and decides which button is lit, so the two cannot drift.
 
 The log **opens on the last seven days** — the question is nearly always "what
 happened today" — and **Load another month** walks *From* back one calendar month

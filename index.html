@@ -336,6 +336,7 @@ a.doc:hover { border-color: var(--fg); }
     <button class="btn quiet" id="rangeWeek" onclick="setRange('week')">This week</button>
     <button class="btn quiet" id="rangeLast" onclick="setRange('last')">Last week</button>
     <button class="btn quiet" id="rangeMonth" onclick="setRange('month')">This month</button>
+    <button class="btn quiet" id="rangeLastMonth" onclick="setRange('lastMonth')">Last month</button>
   </div>
   <p class="note" id="logSpan" style="margin:0 0 1rem"></p>
   <label>
@@ -1049,18 +1050,25 @@ function shownEntries() {
    From and To take any two dates, but the question is nearly always one of
    three. The week starts on Monday, because a working week does.
 
-   One table, read by the buttons that set the dates and by the render that says
-   which button is on. On the first of the month "This month" is a narrower
-   window than the week the log opened on, so pressing it can leave the rows
-   exactly as they were — which is why the state is shown rather than inferred
-   from the list moving. */
+   Every one of them sets **both** ends. An open-ended "this month" is the same
+   window the log already opens on for most of a month, so pressing it left the
+   rows exactly as they were and read as a dead button; closing the far end makes
+   each preset show that period and nothing else, and moves both date fields
+   where you can see it. One table, read by the buttons that set the dates and by
+   the render that says which one is on. */
 const mondayOf = d => { const n = new Date(d); n.setDate(n.getDate() - ((n.getDay() + 6) % 7)); return n; };
 function ranges() {
-  const now = new Date(), mon = mondayOf(now);
+  const now = new Date(), y = now.getFullYear(), m = now.getMonth(), mon = mondayOf(now);
   const back = new Date(mon); back.setDate(back.getDate() - 7);
   const end = new Date(mon); end.setDate(end.getDate() - 1);
-  return { week: [day(mon), ''], last: [day(back), day(end)],
-           month: [day(new Date(now.getFullYear(), now.getMonth(), 1)), ''] };
+  return {
+    week:      [day(mon), day(now)],
+    last:      [day(back), day(end)],
+    month:     [day(new Date(y, m, 1)), day(now)],
+    // Day 0 of this month is the last day of the one before, which is the only
+    // way to write it that survives January and February alike.
+    lastMonth: [day(new Date(y, m - 1, 1)), day(new Date(y, m, 0))],
+  };
 }
 function setRange(which) {
   const [from, to] = ranges()[which];
@@ -1081,7 +1089,8 @@ $('logMore').onclick = () => {
 function renderEntries() {
   const rows = shownEntries();
   const from = $('logFrom').value, to = $('logTo').value, all = ranges();
-  for (const [which, id] of [['week', 'rangeWeek'], ['last', 'rangeLast'], ['month', 'rangeMonth']]) {
+  for (const [which, id] of [['week', 'rangeWeek'], ['last', 'rangeLast'],
+                             ['month', 'rangeMonth'], ['lastMonth', 'rangeLastMonth']]) {
     const on = all[which][0] === from && all[which][1] === to;
     $(id).classList.toggle('on', on);
     $(id).setAttribute('aria-pressed', on);
@@ -1833,8 +1842,9 @@ if (location.hash === '#test') {
   eq(day(mondayOf(new Date(2026, 8, 6))), '2026-08-31');    // Sunday 6 Sep
   eq(day(mondayOf(new Date(2026, 8, 7))), '2026-09-07');    // Monday is its own
   eq(day(mondayOf(new Date(2026, 7, 31))), '2026-08-31');
-  eq(ranges().last[1] < ranges().week[0], true);          // last week ends before this one starts
-  eq(ranges().week[1] === '' && ranges().month[1] === '', true);   // both run up to today
+  eq(ranges().last[1] < ranges().week[0], true);            // last week ends before this one starts
+  eq(ranges().lastMonth[1] < ranges().month[0], true);      // and last month before this one
+  eq(Object.values(ranges()).every(([a, b]) => a && b && a <= b), true);   // every preset is closed at both ends
   eq(spanText('', ''), 'the whole log');
   // The run tag on a card is a search term, spelt either way it is read.
   const hay = searchable({ note: 'x', step_text: 's', subject: 'Pig 7', subject_id: 'A-014',
