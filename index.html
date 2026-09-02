@@ -496,7 +496,14 @@ function show(id) {
 }
 
 /* ================= home ================= */
+// The Lab button says which lab, so belonging to one is not something you have to
+// open a screen to remember. loadLab() finishes after the first paint, so it
+// calls this again rather than holding the paint up.
+function renderLabBtn() {
+  $('labBtn').textContent = lab ? `Lab · ${lab.name}` : 'Lab';
+}
 function renderHome() {
+  renderLabBtn();
   const ul = $('index');
   ul.innerHTML = '';
   const lists = visible();
@@ -506,8 +513,11 @@ function renderHome() {
   }
   for (const l of lists) {
     const total = l.items.reduce((t, s) => t + parseStep(s).secs, 0);
-    const badge = !mine(l) ? '<span class="badge">shared with you</span>'
-                : l.shareToken ? `<span class="badge">${l.shareMode === 'live' ? 'shared live' : 'link out'}</span>` : '';
+    // Lab work is called out on the row: what the lead can read should be legible
+    // from the home screen, not only from inside the editor.
+    const badge = (l.labId && lab ? `<span class="badge">${esc(lab.name)}</span>` : '')
+                + (!mine(l) ? '<span class="badge">shared with you</span>'
+                : l.shareToken ? `<span class="badge">${l.shareMode === 'live' ? 'shared live' : 'link out'}</span>` : '');
     const li = make('li', { innerHTML:
       `<div class="title">${esc(l.title)}</div>
        <div class="meta"><span>${l.items.length} step${l.items.length === 1 ? '' : 's'}</span>` +
@@ -623,6 +633,7 @@ async function showLab() {
 }
 function renderLab() {
   $('labTitle').textContent = lab ? lab.name : 'No lab yet';
+  renderLabBtn();
   const body = $('labBody');
   if (!lab) {
     body.innerHTML = `<p class="note">A lab puts several people's work under one lead. Everyone keeps
@@ -635,11 +646,16 @@ function renderLab() {
   }
   const lead = isLead();
   const me = lab.members.find(m => m.user_id === user.id);
-  body.innerHTML = `<p class="note">${lead
-    ? 'You lead this lab. You see everything logged on its checklists.'
-    : me?.sees_all
-      ? 'You can see everything logged on this lab’s checklists.'
-      : 'You see what you log. The lead sees everything logged on the lab’s checklists.'}</p>`;
+  const leadRow = lab.members.find(m => m.user_id === lab.lead);
+  // A member should be able to answer "whose lab is this, and who reads my work"
+  // without asking anyone.
+  body.innerHTML = `<p class="note">You are in <b>${esc(lab.name)}</b>, led by `
+    + `${esc(lead ? 'you' : leadRow?.email ?? 'the lead')}. ${lead
+      ? 'You see everything logged on its checklists.'
+      : me?.sees_all
+        ? 'You can see everything logged on its checklists, as well as your own work.'
+        : 'You see what you log; the lead sees everything logged on the lab’s checklists. '
+          + 'Your other checklists are not in the lab and nobody else can read them.'}</p>`;
 
   if (lead) {
     body.append(make('label', { innerHTML: '<span class="eyebrow">Lab name</span>' },
@@ -710,12 +726,19 @@ async function sendInvite() {
   if (!email.includes('@')) return note($('labMsg'), 'That is not an email address.', true);
   if (lab.members.some(m => (m.email ?? '').toLowerCase() === email))
     return note($('labMsg'), 'They are already in the lab.', true);
-  const { error } = await sb.from('lab_invites').insert({ lab_id: lab.id, email });
-  if (error) return note($('labMsg'), error.code === '23505' ? 'Already invited.' : error.message, true);
-  // The app cannot send mail — that needs the service key, and the service key
-  // must never be in a browser. The invite is recorded either way; telling them
-  // about it is a message the lead sends, and there is now a button for it.
-  note($('labMsg'), 'Invited. Now send them the link — the button is below.');
+  note($('labMsg'), 'Inviting…');
+  // The invite function records the row and sends the mail, under the lead's own
+  // token so the database decides who may invite. If it is not deployed, or has
+  // no mailer configured, the row is written here instead and the lead sends the
+  // message themselves — an invitation must not depend on a server being up.
+  const { data, error } = await sb.functions.invoke('invite', { body: { labId: lab.id, email } });
+  if (error || !data?.sent) {
+    const { error: err } = await sb.from('lab_invites').insert({ lab_id: lab.id, email });
+    if (err && err.code !== '23505') return note($('labMsg'), err.message, true);
+    note($('labMsg'), 'Invited, but no email went out — send it yourself with the button below.');
+  } else {
+    note($('labMsg'), `Invited. An email is on its way to ${email}.`);
+  }
   $('inviteEmail').value = '';
   await loadLab();
   renderLab();
@@ -1991,7 +2014,7 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY) {
     // know which address signed in. Then the lab itself, for the editor's toggle.
     if (user) await redeemInvites();
     lab = null;
-    if (user) loadLab();
+    if (user) loadLab().then(() => screen === 'home' && renderHome());
     sync();
   });
   addEventListener('focus', () => user && (sync(), flushQueue()));
@@ -2016,7 +2039,8 @@ setMode('up');
 // Settle the session before the first paint, or every signed-in load flashes the sign-in screen.
 if (sb) user = (await sb.auth.getSession()).data.session?.user ?? null;
 renderHome();
-if (user) redeemInvites().then(loadLab);        // not awaited: the first paint does not need a lab
+// Not awaited: the first paint does not need a lab, it only needs naming once one is known.
+if (user) redeemInvites().then(loadLab).then(() => screen === 'home' && renderHome());
 flushQueue();                                   // anything stranded by a dead network last time
 navigator.serviceWorker?.register('sw.js').catch(() => {});
 const invite = location.hash.match(/^#share=([0-9a-f-]{36})$/i);

@@ -63,6 +63,7 @@ signup confirmations bounce to Supabase's default `localhost:3000` unless
 | `sw.js` | Service worker: the page is network-first, the rest stale-while-revalidate |
 | `icon.svg`, `icon-192.png`, `icon-512.png` | App icons (192/512 generated from the SVG with `qlmanage` + `sips`) |
 | `supabase/migrations/*.sql` | Schema, in order. Source of truth for the database |
+| `supabase/functions/invite/` | The one piece of server: sends a lab invitation by email |
 | `supabase/config.toml` | Marks the directory for the Supabase GitHub integration |
 
 One HTML file on purpose: no build step, no bundler, no dependency to keep
@@ -163,19 +164,46 @@ first time that address signs in, joins them, and deletes the invite. Same shape
 as the `pendingInvite` share link, except the server holds it, because the person
 it is for has not been here yet.
 
-**The app does not send the mail; your mail app does.** Sending from Checkoff
-would mean the service key, which must never reach a browser, so it would mean an
-Edge Function and a mail provider — infrastructure this app has done without on
-purpose. **Email them** on a pending invite hands the message to
-`navigator.share` on a phone and to `mailto:` on a desktop, both of which send a
-real email with no infrastructure at all, from someone the reader recognises
-rather than a no-reply address. It can be sent again as often as it takes,
-because the invite is a row and the message is only how they hear about it. The
-screen says outright that nothing was sent — a button called Send invite that
-quietly sends nothing is the same defect as a dead one.
+**Inviting goes through the one Edge Function**, `supabase/functions/invite`. It
+exists for exactly one reason: sending mail needs a provider's API key, and a key
+in a browser is a key anyone can read.
+
+**It holds no service key.** The caller's own JWT is forwarded to PostgREST, so
+row level security decides whether this person may invite anyone to this lab —
+the same rule the app obeys, checked by the database rather than re-implemented
+in TypeScript. A leaked function URL is worth nothing without a lead's session
+behind it.
+
+```
+supabase functions deploy invite
+supabase secrets set RESEND_API_KEY=re_…
+supabase secrets set INVITE_FROM='Checkoff <invites@your-domain>'
+supabase secrets set APP_URL=https://andreasmaskos.github.io/Checkoff/
+```
+
+Resend will only deliver to your own address until a sending domain is verified.
+Without `RESEND_API_KEY` the function still records the invite and replies
+`{ sent: false, reason }` rather than pretending — and the invitation is written
+before the send is attempted, so a mailer that is down loses a message, never an
+invitation.
+
+**The app works with the function absent.** If `functions.invoke` fails at all —
+not deployed, no mailer, offline — the client writes the `lab_invites` row itself
+and says plainly that no email went out. **Email them** on a pending invite then
+hands the message to `navigator.share` on a phone or `mailto:` on a desktop, which
+send a real email with no infrastructure and arrive from someone the reader
+recognises. It can be used any number of times, because the invite is a row and
+the message is only how they hear about it.
 
 The lead renames the lab from the same screen — the `lead runs the lab` update policy
 already allowed it, so it was a button and nothing else.
+
+**Everyone can see which lab they are in**: the home button reads *Lab · Cardiac
+surgery group*, a checklist in the lab carries the lab's name as a badge on the
+home row, and the Lab screen names the lead. A member should be able to answer
+"whose lab is this, and which of my checklists can they read" without asking
+anyone — the badge is the honest half of that, since it is the `lab_id` toggle
+and nothing else that puts a log in front of the lead.
 
 **One lab per person** (`limit 1`), until someone is in two.
 
