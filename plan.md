@@ -38,7 +38,9 @@ Last updated 2026-08-31.
 | 22 | Retrospective entry — a capture, and the run around it, dated to when it happened | done, live |
 | 23 | An entry is one unit with several files (`group_id`) | done, live |
 | 24 | Subject on the run — animal, patient or sample, by name and by id | done, live |
-| 25 | Day headings and This week / Last week / This month; a run's own log; Copy as text | done, live |
+| 25 | Day headings and the four date ranges; a run's own log; Copy as text | done, live |
+| 26 | Labs — a lead, members, invites by email, and `lists.lab_id` | done, live |
+| 27 | A log follows its row's owner, not the list; storage names carry the owner | done, live |
 | 14 | Purge of a deleted checklist and its log | done, live |
 | 15 | Export of the filtered log — standalone HTML or CSV | done, live |
 | 16 | Offline upload queue, run ids, notes without a picture | done, live |
@@ -122,7 +124,60 @@ which screen is up and `sync()` respects it.
 returned by the server — that's how "the owner revoked my access" and "I left the
 list" clean up. It never drops lists we own, so a failed push cannot eat them.
 
+## Labs
+
+A lead, some members, and the checklists that belong to it. This is where access
+stops following the **list** and starts following the **row's owner**.
+
+```sql
+labs        { id, name, lead }
+lab_members { lab_id, user_id, email, sees_all }
+lab_invites { lab_id, email }
+lists.lab_id
+```
+
+| You are | You see |
+|---------|---------|
+| Anyone | every row you logged, wherever you logged it |
+| The lead | everything logged on the lab's checklists |
+| A member with `sees_all` | everything logged on the lab's checklists |
+| Everyone else | nothing of yours |
+
+It all comes down to `may_see(list, owner)`: *my own row, or a row on a lab
+checklist I lead or have been unlocked in.* It is on the select policy for
+`log_entries` and `runs`, and on the storage policy, so the three cannot disagree
+about who may read what.
+
+**The lab is on the list, not on the person.** "The lead sees what everyone did"
+would otherwise reach into someone's private checklists. A checklist with no
+`lab_id` is nobody else's business, and the toggle that puts one in the lab is in
+the editor, on your own lists only.
+
+**`sees_all` is one switch per member, not a grant per pair.** "Unlocked to see
+the lab's work" is what was asked for; `lab_grants(viewer, subject)` — A sees B
+but not C — is the upgrade when someone actually needs it.
+
+**Invites are addressed to an email and redeemed on sign-in.** Nothing is sent:
+`accept_lab_invites()` matches `auth.jwt() ->> 'email'` against `lab_invites` the
+first time that address signs in, joins them, and deletes the invite. The lead is
+told plainly that no message went out, or the button looks like it emailed
+someone. Same shape as the `pendingInvite` share link, except the server holds it,
+because the person it is for has not been here yet.
+
+**One lab per person** (`limit 1`), until someone is in two.
+
+**The lead is a role, not a login.** Nothing here is a master account: `owner` on
+every row is what makes all of it possible, and a shared password would destroy
+that column's meaning.
+
 ## Sharing
+
+Live sharing no longer shares the log. Joining a live list means editing **the
+steps** together and running it; what each person logs against it stays theirs.
+That is the point of the lab: a group that reads each other's work says so, per
+checklist, rather than getting it as a side effect of holding a link. The copy
+in the editor says this in all three of its states, because the old copy promised
+a shared record and would now be a lie.
 
 Two modes, picked per list in the editor.
 
@@ -341,10 +396,14 @@ filter moves into PostgREST (`or(note.ilike…)`) when they run to thousands.
 - The file **extension** is what tells a clip from a picture on the way back
   down (`isClip`), rather than a mime column on the table — one regex, no
   migration, and the extension is already in the path.
-- Files live in the private `logs` bucket as `<list_id>/<uuid><ext>`. Naming them
-  by list is what lets access follow the list: the storage policy runs the same
-  `owns_list` / `is_member` check the table does, so everyone on a live-shared
-  list keeps **one** shared record instead of one private log each.
+- Files live in the private `logs` bucket as **`<list_id>/<owner>/<uuid><ext>`**.
+  The owner is in the name because a policy can only follow the row rule if it can
+  read the owner off the object, and there is no join from a storage object to its
+  row. Objects written before this are `<list_id>/<uuid><ext>`, have no owner to
+  check, and keep the rule they were written under — `owns_list or is_member` —
+  rather than becoming unreadable. `log_object_access()` tells them apart by
+  whether the second path segment is a uuid; a filename is `<uuid><ext>` and so
+  never is. Nothing is renamed.
 - Reads go through 1-hour signed URLs, so an image link can't be forwarded to
   someone outside the list forever.
 - **Nothing uploads directly.** Every capture is written to IndexedDB first and

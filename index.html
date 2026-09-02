@@ -219,12 +219,20 @@ a.doc:hover { border-color: var(--fg); }
   <div class="row" style="margin-top:1.25rem">
     <button class="btn go" onclick="edit(null)">New checklist</button>
     <button class="btn" id="allLogsBtn" onclick="showLog(null)">Search all logs</button>
+    <button class="btn" id="labBtn" onclick="showLab()">Lab</button>
     <span class="spacer"></span>
     <button class="btn quiet" id="acctBtn"></button>
   </div>
   <p class="note" id="queuedHome"></p>
   <button class="btn quiet hidden" id="dropStuck" onclick="discardStuck()"></button>
   <p class="note" id="support"></p>
+</section>
+
+<!-- ============ lab ============ -->
+<section id="labView" class="hidden">
+  <p class="eyebrow" style="padding-top:1.25rem">Lab</p>
+  <h1 id="labTitle" style="font:650 1.75rem/1.15 var(--sans);letter-spacing:-.03em;margin:.2rem 0 1.25rem"></h1>
+  <div id="labBody"></div>
 </section>
 
 <!-- ============ editor ============ -->
@@ -239,6 +247,11 @@ a.doc:hover { border-color: var(--fg); }
     <textarea id="items" placeholder="Kettle on&#10;Grind beans @40s&#10;Rinse portafilter&#10;Pull shot @28s"></textarea>
   </label>
   <p class="note">Add a countdown with <code>@</code> — <code>@2m</code>, <code>@30s</code>, <code>@1:30</code>, or <code>@3</code> for minutes.</p>
+
+  <label class="row hidden" id="labWorkRow" style="gap:.5rem;margin-bottom:1rem">
+    <input type="checkbox" id="labWork" style="width:auto">
+    <span class="note" id="labWorkNote"></span>
+  </label>
 
   <div class="panel" id="sharePanel">
     <h2>Sharing</h2>
@@ -532,6 +545,15 @@ function edit(id) {
   $('title').value = l.title;
   $('items').value = l.items.join('\n');
   $('removeBtn').textContent = mine(l) ? 'Delete' : 'Leave this list';
+  // Marking a checklist as the lab's is what puts its log in front of the lead.
+  // Only offered to people in a lab, and only on their own checklists.
+  const canLab = lab && mine(l);
+  $('labWorkRow').classList.toggle('hidden', !canLab);
+  if (canLab) {
+    $('labWork').checked = l.labId === lab.id;
+    $('labWorkNote').textContent = `${lab.name} work — everything logged on it is visible to `
+      + `${lab.lead === user.id ? 'you as lead' : 'the lab lead'}. Leave it off and this checklist is yours alone.`;
+  }
   renderShare(l);
   show('editor');
 }
@@ -540,6 +562,7 @@ function save() {
     title: $('title').value.trim() || 'Untitled',
     items: $('items').value.split('\n').map(s => s.trim()).filter(Boolean),
   };
+  if (lab && !$('labWorkRow').classList.contains('hidden')) fields.labId = $('labWork').checked ? lab.id : null;
   let l;
   if (editing === null) db.lists.push(l = { id: crypto.randomUUID(), ...fields });
   else Object.assign(l = byId(editing), fields);
@@ -550,6 +573,8 @@ async function removeList() {
   const l = editing !== null && byId(editing);
   if (!l) return renderHome();
   if (!mine(l)) {
+    if (l.labId) return alert('This is one of the lab’s checklists. Ask the lead to take it out of the lab, '
+      + 'or to remove you from the lab — leaving it here would only bring it back on the next sync.');
     if (!confirm('Leave this list? The owner keeps it.')) return;
     await sb.from('shares').delete().eq('list_id', l.id);
     db.lists = db.lists.filter(x => x !== l);
@@ -559,6 +584,141 @@ async function removeList() {
     touch(l);
   } else return;
   renderHome();
+}
+
+/* ================= the lab =================
+   A lead, some members, and the checklists that belong to it. The point of it is
+   the rule underneath: a log follows the row's owner, not the list. You see what
+   you logged; the lead sees everything logged on the lab's checklists; a member
+   the lead has unlocked sees the lab's work too. A checklist with no lab is
+   nobody else's business, which is why the lab is on the list and not on you. */
+let lab = null;
+const isLead = () => !!lab && lab.lead === user?.id;
+// An invite is addressed to an email, and redeemed the first time that address
+// signs in — the same shape as a share link waiting in localStorage, except the
+// server holds it, because the person it is for has not been here yet.
+async function redeemInvites() {
+  if (!sb || !user) return;
+  await sb.rpc('accept_lab_invites').catch(() => {});
+}
+async function loadLab() {
+  lab = null;
+  if (!sb || !user) return;
+  // ponytail: the first lab RLS returns. One lab per person until someone is in two.
+  const { data } = await sb.from('labs').select('*').limit(1);
+  if (!data?.length) return;
+  const [{ data: members }, { data: invites }] = await Promise.all([
+    sb.from('lab_members').select('*').eq('lab_id', data[0].id).order('joined_at'),
+    sb.from('lab_invites').select('*').eq('lab_id', data[0].id).order('created_at'),
+  ]);
+  lab = { ...data[0], members: members ?? [], invites: invites ?? [] };   // invites: [] unless I lead it
+}
+async function showLab() {
+  $('labTitle').textContent = 'Lab';
+  $('labBody').innerHTML = '<p class="note">Loading…</p>';
+  show('labView');
+  if (!user) return $('labBody').innerHTML = '<p class="note">Sign in to use a lab.</p>';
+  await loadLab();
+  renderLab();
+}
+function renderLab() {
+  $('labTitle').textContent = lab ? lab.name : 'No lab yet';
+  const body = $('labBody');
+  if (!lab) {
+    body.innerHTML = `<p class="note">A lab puts several people's work under one lead. Everyone keeps
+      their own log — the lead sees everything logged on the lab's checklists, and nobody else does
+      unless the lead unlocks them.</p>
+      <label><span class="eyebrow">Name</span><input id="labName" placeholder="Cardiac surgery group"></label>`;
+    body.append(make('div', { className: 'row' }, [button('Create a lab', createLab, 'btn go'),
+      make('span', { className: 'note', id: 'labMsg' })]));
+    return;
+  }
+  const lead = isLead();
+  const me = lab.members.find(m => m.user_id === user.id);
+  body.innerHTML = `<p class="note">${lead
+    ? 'You lead this lab. You see everything logged on its checklists.'
+    : me?.sees_all
+      ? 'You can see everything logged on this lab’s checklists.'
+      : 'You see what you log. The lead sees everything logged on the lab’s checklists.'}</p>`;
+
+  if (lead) {
+    body.append(make('label', { innerHTML: '<span class="eyebrow">Invite by email</span>' },
+      [make('input', { id: 'inviteEmail', type: 'email', placeholder: 'them@university.edu' })]));
+    body.append(make('div', { className: 'row', style: 'margin-bottom:1.5rem' },
+      [button('Send invite', sendInvite, 'btn go'), make('span', { className: 'note', id: 'labMsg' })]));
+  }
+
+  body.append(make('p', { className: 'eyebrow', textContent: `${lab.members.length} in the lab` }));
+  for (const m of lab.members) {
+    const who = m.user_id === user.id ? `${m.email ?? 'you'} — you` : m.email ?? m.user_id.slice(0, 8);
+    const role = m.user_id === lab.lead ? 'lead' : m.sees_all ? 'sees everything' : 'own work only';
+    const card = make('div', { className: 'entry', innerHTML:
+      `<div class="meta"><span class="which">${esc(who)}</span><span>${esc(role)}</span></div>` });
+    if (lead && m.user_id !== lab.lead) card.append(make('div', { className: 'row runActs' }, [
+      button(m.sees_all ? 'Lock to their own work' : 'Let them see the lab’s work',
+        () => setSeesAll(m, !m.sees_all), 'btn quiet'),
+      button('Remove', () => removeMember(m), 'btn quiet'),
+    ]));
+    body.append(card);
+  }
+
+  if (lead && lab.invites.length) {
+    body.append(make('p', { className: 'eyebrow', style: 'margin-top:1.5rem',
+                            textContent: `${lab.invites.length} invited, not joined yet` }));
+    for (const i of lab.invites) {
+      const card = make('div', { className: 'entry', innerHTML:
+        `<div class="meta"><span class="which">${esc(i.email)}</span><span>invited ${esc(stamp(i.created_at))}</span></div>` });
+      card.append(make('div', { className: 'row runActs' },
+        [button('Cancel invite', () => cancelInvite(i), 'btn quiet')]));
+      body.append(card);
+    }
+  }
+}
+async function createLab() {
+  const name = $('labName').value.trim();
+  if (!name) return note($('labMsg'), 'Give the lab a name.', true);
+  const { data, error } = await sb.from('labs').insert({ name, lead: user.id }).select().single();
+  if (error) return note($('labMsg'), error.message, true);
+  const { error: err } = await sb.from('lab_members')
+    .insert({ lab_id: data.id, user_id: user.id, email: user.email, sees_all: true });
+  if (err) return note($('labMsg'), err.message, true);
+  await loadLab();
+  renderLab();
+}
+async function sendInvite() {
+  const email = $('inviteEmail').value.trim().toLowerCase();
+  if (!email.includes('@')) return note($('labMsg'), 'That is not an email address.', true);
+  if (lab.members.some(m => (m.email ?? '').toLowerCase() === email))
+    return note($('labMsg'), 'They are already in the lab.', true);
+  const { error } = await sb.from('lab_invites').insert({ lab_id: lab.id, email });
+  if (error) return note($('labMsg'), error.code === '23505' ? 'Already invited.' : error.message, true);
+  // Nothing is emailed: the invite waits in the lab and is taken up the first
+  // time that address signs in. Say so, or it looks like a message was sent.
+  note($('labMsg'), 'Invited. They join when they next sign in with that address.');
+  $('inviteEmail').value = '';
+  await loadLab();
+  renderLab();
+}
+async function setSeesAll(m, on) {
+  const { error } = await sb.from('lab_members').update({ sees_all: on })
+    .eq('lab_id', lab.id).eq('user_id', m.user_id);
+  if (error) return alert(error.message);
+  m.sees_all = on;
+  renderLab();
+}
+async function removeMember(m) {
+  if (!confirm(`Remove ${m.email ?? 'this person'} from the lab?\n\n`
+    + 'What they logged stays where it is — you keep seeing it on the lab’s checklists, and they keep their own copy.')) return;
+  const { error } = await sb.from('lab_members').delete().eq('lab_id', lab.id).eq('user_id', m.user_id);
+  if (error) return alert(error.message);
+  lab.members = lab.members.filter(x => x.user_id !== m.user_id);
+  renderLab();
+}
+async function cancelInvite(i) {
+  const { error } = await sb.from('lab_invites').delete().eq('id', i.id);
+  if (error) return alert(error.message);
+  lab.invites = lab.invites.filter(x => x.id !== i.id);
+  renderLab();
 }
 
 /* ================= steps & timers ================= */
@@ -882,7 +1042,10 @@ async function pushItem(item) {
     // Nothing to send, and no later flush can change that: the bytes went away
     // under us. Says so plainly instead of "No content provided" from the server.
     if (!item.blob.size) return { message: 'file lost by the browser before it uploaded', dead: true };
-    path = `${item.list}/${item.id}${item.ext}`;
+    // <list_id>/<owner>/<uuid>: the storage policy can only follow the row rule
+    // if the owner is in the name. Objects written before this keep the old
+    // shape and the old rule; nothing is renamed.
+    path = `${item.list}/${user.id}/${item.id}${item.ext}`;
     const { error } = await sb.storage.from('logs')
       .upload(path, item.blob, { contentType: item.type, upsert: true });
     if (error) return error;
@@ -1251,7 +1414,7 @@ async function saveEntryEdit(e, form) {
     const blob = kind === 'image' ? await shrink(file) : file;
     if (blob.size > MAX) return note(msg, oversize(blob), true);
     note(msg, `Uploading ${added.length + 1}/${files.length}…`);
-    const path = `${e.list_id}/${crypto.randomUUID()}${kind === 'image' ? '.jpg' : extOf(file.name, file.type)}`;
+    const path = `${e.list_id}/${user.id}/${crypto.randomUUID()}${kind === 'image' ? '.jpg' : extOf(file.name, file.type)}`;
     const { error } = await sb.storage.from('logs').upload(path, blob,
       { contentType: kind === 'image' ? 'image/jpeg' : file.type || 'application/octet-stream' });
     if (error) return note(msg, error.message, true);
@@ -1551,10 +1714,12 @@ let sb = null, user = null;
 
 const toRow = l => ({ id: l.id, owner: l.owner ?? user.id, title: l.title, items: l.items,
                       share_token: l.shareToken ?? null, share_mode: l.shareMode ?? 'copy',
+                      lab_id: l.labId ?? null,
                       deleted: !!l.deleted, updated_at: new Date(l.updatedAt).toISOString() });
 const fromRow = r => ({ id: r.id, owner: r.owner, title: r.title, items: r.items,
                         updatedAt: Date.parse(r.updated_at), deleted: r.deleted,
-                        shareToken: r.share_token ?? undefined, shareMode: r.share_mode });
+                        shareToken: r.share_token ?? undefined, shareMode: r.share_mode,
+                        labId: r.lab_id ?? undefined });
 
 // ponytail: last-write-wins per list, whole-list granularity. Two people editing the
 // same list at the same moment still lose one side — needs per-item merge if that bites.
@@ -1599,7 +1764,7 @@ function renderShare(l) {
     return;
   }
   if (editing === null) { box.innerHTML = '<p class="note">Save the checklist first, then you can share it.</p>'; return; }
-  if (!mine(l)) { box.innerHTML = '<p class="note">Shared with you by someone else. Your edits are visible to everyone on the list.</p>'; return; }
+  if (!mine(l)) { box.innerHTML = '<p class="note">Shared with you by someone else. Your edits to the steps are visible to everyone on the list; what you log against it is yours.</p>'; return; }
 
   if (!l.shareToken) {
     box.innerHTML = '<p class="note">Two ways to hand this list to someone.</p>';
@@ -1608,12 +1773,13 @@ function renderShare(l) {
       button('Share live', () => setShare(l, 'live')),
     ]));
     box.append(make('p', { className: 'note', style: 'margin-top:.6rem',
-      textContent: 'A copy is theirs alone and drifts apart from yours. Live means one list, both of you editing it.' }));
+      textContent: 'A copy is theirs alone and drifts apart from yours. Live means one list, both of you editing '
+        + 'the steps — but each of you sees only your own log. To read someone else’s work, put the checklist in a lab.' }));
     return;
   }
   const url = shareUrl(l);
   box.innerHTML = `<p class="note">${l.shareMode === 'live'
-    ? 'Anyone who opens this link joins <b>this</b> list and can edit it.'
+    ? 'Anyone who opens this link joins <b>this</b> list and can edit its steps. Their log stays their own.'
     : 'Anyone who opens this link gets their own copy.'}</p>`;
   box.append(make('input', { id: 'linkOut', readOnly: true, value: url, onclick: e => e.target.select() }));
   box.append(make('div', { className: 'row', style: 'margin-top:.6rem' }, [
@@ -1784,6 +1950,11 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY) {
       await sb.rpc('accept_invite', { token: localStorage.pendingInvite });
       delete localStorage.pendingInvite;
     }
+    // A lab invite is addressed to the email, so it can only be taken up once we
+    // know which address signed in. Then the lab itself, for the editor's toggle.
+    if (user) await redeemInvites();
+    lab = null;
+    if (user) loadLab();
     sync();
   });
   addEventListener('focus', () => user && (sync(), flushQueue()));
@@ -1793,7 +1964,7 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY) {
 Object.assign(window, { $, edit, save, removeList, start, mark, move, undo, quit, toggleMic, renderHome, setMode,
                         magicLink, saveShot, cancelShot, newNote, dictate, showLog, showRuns,
                         exportLog, exportCsv, showAccount, changeEmail, changePassword, discardStuck,
-                        setRange, copyLog, openSubject, saveSubject,
+                        setRange, copyLog, openSubject, saveSubject, showLab,
                         signOut: () => sb.auth.signOut() });
 /* This is a module, so nothing above is global: an inline onclick looks its name
    up on window and a button whose handler is missing from that list does nothing
@@ -1808,6 +1979,7 @@ setMode('up');
 // Settle the session before the first paint, or every signed-in load flashes the sign-in screen.
 if (sb) user = (await sb.auth.getSession()).data.session?.user ?? null;
 renderHome();
+if (user) redeemInvites().then(loadLab);        // not awaited: the first paint does not need a lab
 flushQueue();                                   // anything stranded by a dead network last time
 navigator.serviceWorker?.register('sw.js').catch(() => {});
 const invite = location.hash.match(/^#share=([0-9a-f-]{36})$/i);
