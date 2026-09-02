@@ -164,6 +164,9 @@ told plainly that no message went out, or the button looks like it emailed
 someone. Same shape as the `pendingInvite` share link, except the server holds it,
 because the person it is for has not been here yet.
 
+The lead renames the lab from the same screen — the `lead runs the lab` update policy
+already allowed it, so it was a button and nothing else.
+
 **One lab per person** (`limit 1`), until someone is in two.
 
 **The lead is a role, not a login.** Nothing here is a master account: `owner` on

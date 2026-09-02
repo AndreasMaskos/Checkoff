@@ -642,6 +642,10 @@ function renderLab() {
       : 'You see what you log. The lead sees everything logged on the lab’s checklists.'}</p>`;
 
   if (lead) {
+    body.append(make('label', { innerHTML: '<span class="eyebrow">Lab name</span>' },
+      [make('input', { id: 'labRename', value: lab.name })]));
+    body.append(make('div', { className: 'row', style: 'margin-bottom:1.5rem' },
+      [button('Rename', renameLab), make('span', { className: 'note', id: 'labRenameMsg' })]));
     body.append(make('label', { innerHTML: '<span class="eyebrow">Invite by email</span>' },
       [make('input', { id: 'inviteEmail', type: 'email', placeholder: 'them@university.edu' })]));
     body.append(make('div', { className: 'row', style: 'margin-bottom:1.5rem' },
@@ -683,6 +687,16 @@ async function createLab() {
     .insert({ lab_id: data.id, user_id: user.id, email: user.email, sees_all: true });
   if (err) return note($('labMsg'), err.message, true);
   await loadLab();
+  renderLab();
+}
+// The heading changing is the confirmation, so there is nothing to say on success.
+async function renameLab() {
+  const name = $('labRename').value.trim();
+  if (!name) return note($('labRenameMsg'), 'A lab needs a name.', true);
+  if (name === lab.name) return;
+  const { error } = await sb.from('labs').update({ name }).eq('id', lab.id);
+  if (error) return note($('labRenameMsg'), error.message, true);
+  lab.name = name;
   renderLab();
 }
 async function sendInvite() {
