@@ -157,12 +157,22 @@ the editor, on your own lists only.
 the lab's work" is what was asked for; `lab_grants(viewer, subject)` — A sees B
 but not C — is the upgrade when someone actually needs it.
 
-**Invites are addressed to an email and redeemed on sign-in.** Nothing is sent:
+**Invites are addressed to an email and redeemed on sign-in.**
 `accept_lab_invites()` matches `auth.jwt() ->> 'email'` against `lab_invites` the
-first time that address signs in, joins them, and deletes the invite. The lead is
-told plainly that no message went out, or the button looks like it emailed
-someone. Same shape as the `pendingInvite` share link, except the server holds it,
-because the person it is for has not been here yet.
+first time that address signs in, joins them, and deletes the invite. Same shape
+as the `pendingInvite` share link, except the server holds it, because the person
+it is for has not been here yet.
+
+**The app does not send the mail; your mail app does.** Sending from Checkoff
+would mean the service key, which must never reach a browser, so it would mean an
+Edge Function and a mail provider — infrastructure this app has done without on
+purpose. **Email them** on a pending invite hands the message to
+`navigator.share` on a phone and to `mailto:` on a desktop, both of which send a
+real email with no infrastructure at all, from someone the reader recognises
+rather than a no-reply address. It can be sent again as often as it takes,
+because the invite is a row and the message is only how they hear about it. The
+screen says outright that nothing was sent — a button called Send invite that
+quietly sends nothing is the same defect as a dead one.
 
 The lead renames the lab from the same screen — the `lead runs the lab` update policy
 already allowed it, so it was a button and nothing else.

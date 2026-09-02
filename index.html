@@ -648,8 +648,12 @@ function renderLab() {
       [button('Rename', renameLab), make('span', { className: 'note', id: 'labRenameMsg' })]));
     body.append(make('label', { innerHTML: '<span class="eyebrow">Invite by email</span>' },
       [make('input', { id: 'inviteEmail', type: 'email', placeholder: 'them@university.edu' })]));
-    body.append(make('div', { className: 'row', style: 'margin-bottom:1.5rem' },
+    body.append(make('div', { className: 'row' },
       [button('Send invite', sendInvite, 'btn go'), make('span', { className: 'note', id: 'labMsg' })]));
+    body.append(make('p', { className: 'note', style: 'margin:.6rem 0 1.5rem',
+      textContent: 'Checkoff does not send the mail itself. Adding someone here reserves their place; '
+        + '“Email them” below opens your own mail app with the message written. They join the moment '
+        + 'they sign in with that address.' }));
   }
 
   body.append(make('p', { className: 'eyebrow', textContent: `${lab.members.length} in the lab` }));
@@ -672,8 +676,10 @@ function renderLab() {
     for (const i of lab.invites) {
       const card = make('div', { className: 'entry', innerHTML:
         `<div class="meta"><span class="which">${esc(i.email)}</span><span>invited ${esc(stamp(i.created_at))}</span></div>` });
-      card.append(make('div', { className: 'row runActs' },
-        [button('Cancel invite', () => cancelInvite(i), 'btn quiet')]));
+      card.append(make('div', { className: 'row runActs' }, [
+        button('Email them', () => sendInviteMessage(i)),
+        button('Cancel invite', () => cancelInvite(i), 'btn quiet'),
+      ]));
       body.append(card);
     }
   }
@@ -706,12 +712,29 @@ async function sendInvite() {
     return note($('labMsg'), 'They are already in the lab.', true);
   const { error } = await sb.from('lab_invites').insert({ lab_id: lab.id, email });
   if (error) return note($('labMsg'), error.code === '23505' ? 'Already invited.' : error.message, true);
-  // Nothing is emailed: the invite waits in the lab and is taken up the first
-  // time that address signs in. Say so, or it looks like a message was sent.
-  note($('labMsg'), 'Invited. They join when they next sign in with that address.');
+  // The app cannot send mail — that needs the service key, and the service key
+  // must never be in a browser. The invite is recorded either way; telling them
+  // about it is a message the lead sends, and there is now a button for it.
+  note($('labMsg'), 'Invited. Now send them the link — the button is below.');
   $('inviteEmail').value = '';
   await loadLab();
   renderLab();
+}
+/* Checkoff has no mailer of its own, and getting one means an Edge Function and
+   a mail provider — infrastructure this app has done without on purpose. The
+   phone's share sheet and the desktop's mail client both send a real email
+   without any of it, and it arrives from someone the reader knows rather than
+   from a no-reply address. The invite is already recorded; this is only how they
+   hear about it, and it can be sent again as often as it takes. */
+const inviteText = email => `You’re invited to join ${lab.name} on Checkoff.\n\n`
+  + `1. Open ${location.href.split('#')[0]}\n`
+  + `2. Sign in with ${email} — create the account there if you have not got one\n\n`
+  + `That is all: you are in the lab the moment you sign in with that address.`;
+async function sendInviteMessage(i) {
+  const subject = `Join ${lab.name} on Checkoff`, body = inviteText(i.email);
+  if (navigator.share) return navigator.share({ title: subject, text: body }).catch(() => {});
+  location.href = `mailto:${encodeURIComponent(i.email)}?subject=${encodeURIComponent(subject)}`
+    + `&body=${encodeURIComponent(body)}`;
 }
 async function setSeesAll(m, on) {
   const { error } = await sb.from('lab_members').update({ sees_all: on })
